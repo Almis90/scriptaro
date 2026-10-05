@@ -1,0 +1,22 @@
+# Portable rehearsal. No desktop input: useful for testing the UI and retakes.
+version: 1
+name: Two-take rehearsal
+defaults:
+  timeout_ms: 5000
+sections:
+  - name: Introduction
+    setup:
+      - action: wait
+        duration_ms: 200
+    reset: [] # This wait-only take has no external state to restore.
+    steps:
+      - action: wait
+        duration_ms: 1000
+  - name: Demonstration
+    setup:
+      - action: wait
+        duration_ms: 200
+    reset: []
+    steps:
+      - action: wait
+        duration_ms: 1500

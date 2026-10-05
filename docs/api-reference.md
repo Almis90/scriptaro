@@ -1,10 +1,11 @@
 <script setup>
 import { withBase } from 'vitepress'
 const crates = [
-  ['scriptaro_core', 'Scripts, actions, validation, and YAML parsing.'],
+  ['scriptaro_core', 'Scripts, actions, validation, YAML parsing, and shared starter recipes.'],
   ['scriptaro_platform', 'Backend contract, capabilities, errors, and simulation.'],
   ['scriptaro_engine', 'Playback, timing, control handles, and progress events.'],
   ['scriptaro_platform_macos', 'Native macOS backend.'],
+  ['scriptaro_desktop', 'Portable document and playback session model for desktop hosts.'],
 ]
 </script>
 

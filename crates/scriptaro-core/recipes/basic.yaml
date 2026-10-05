@@ -1,0 +1,5 @@
+version: 1
+name: My sequence
+steps:
+  - action: wait
+    duration_ms: 1000

@@ -3,6 +3,11 @@
 The repository separates the runnable Rust host in `example/` from YAML recipes
 in `examples/`. Neither requires a package registry release.
 
+For a new script, use `scriptaro recipes` and `scriptaro init take.yaml --recipe
+text-entry`, or **New from recipe…** in the desktop app. Shared starters live in
+`crates/scriptaro-core/recipes/` and cover text entry, two-field forms and app
+switching. See [Prepare a script](/guide/preparation).
+
 ## Rust host example
 
 ```sh
@@ -32,6 +37,14 @@ Open a blank plain-text document before live playback.
 
 <<< ../../examples/notes-macos.yaml
 
+## Specific window
+
+Prepare a blank TextEdit document, inspect its exact title with
+`scriptaro windows --app com.apple.TextEdit`, and adjust the selector below.
+This example waits for that window and establishes a window-level focus guard.
+
+<<< ../../examples/window-macos.yaml
+
 ## Editor and browser tutorial
 
 This sequence uses generic actions to open a file, type prepared code, run a
@@ -51,3 +64,7 @@ primary display. Adapt this recipe to your own display and window placement.
 
 The [browser playground](/playground) illustrates the four-step Rust example.
 It is a visual simulation, not a native automation host.
+
+## Controls and retakes
+
+`examples/sections.yaml` is a portable wait-only rehearsal with two named takes and explicit empty resets. It is suitable for the desktop UI smoke test. `examples/controls-macos.yaml` demonstrates field targeting and an explicit reset that replaces the selected field’s text; replace its placeholder application and selectors before native playback. See [script format](/script-format) and [desktop interface](/guide/desktop).

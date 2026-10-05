@@ -16,6 +16,15 @@ documentation when implementing this milestone.
   in each target application.
 - [CoreGraphics Rust bindings](https://docs.rs/crate/core-graphics/0.25.0)
   own event objects and expose keyboard/mouse/scroll construction and posting.
+- [AXUIElementCopyAttributeValue](https://developer.apple.com/documentation/applicationservices/1462085-axuielementcopyattributevalue)
+  reads window lists, titles and focused-window identities. The backend retains
+  returned CF objects and checks their types before use.
+- [AXUIElementSetMessagingTimeout](https://developer.apple.com/documentation/applicationservices/1459345-axuielementsetmessagingtimeout)
+  bounds each remote Accessibility call. Timeouts are applied to individual
+  elements, without changing a process-global setting.
+- [kAXFocusedWindowAttribute](https://developer.apple.com/documentation/applicationservices/kaxfocusedwindowattribute)
+  identifies the focused window. Raising a window is followed by observing this
+  attribute and checking the frontmost process, rather than assuming activation.
 - [CGEventSource key state](https://developer.apple.com/documentation/coregraphics/cgeventsource/keystate(_:key:))
   supports polling the physical Control–Option–Escape combination. Scriptaro
   advertises this only when Input Monitoring access is available.
@@ -24,5 +33,25 @@ documentation when implementing this milestone.
 
 SDK declarations for `AXIsProcessTrusted`, `CGPreflightPostEventAccess`,
 `CGPreflightListenEventAccess`, and `CGEventSourceKeyState` were verified locally.
+AXUIElement create/copy/set/action/type-ID/timeout declarations and AXError values
+were also verified against the local HIServices SDK headers.
 The backend does not use `AXMakeProcessTrusted`, run AppleScript, change system
 permissions automatically, or execute subprocesses for automation actions.
+
+Control targeting adds `AXChildren`, `AXRole`, `AXSubrole`, `AXIdentifier`, `AXTitle`/`AXDescription`, `AXEnabled`, `AXFocusedUIElement`, setting `AXFocused`, and the `AXPress` action. CF object types and ownership are checked in the Accessibility boundary. [Apple's attribute-setting contract](https://developer.apple.com/documentation/applicationservices/1460434-axuielementsetattributevalue) documents unsupported, invalid-object and communication errors; these propagate without blind retries. Discovery is bounded and refuses partial results.
+
+The desktop host uses `objc2-app-kit` views and a nonactivating transport panel. It pumps bounded AppKit events alongside Tokio on the main thread. The backend and engine remain independent of AppKit view code.
+
+For Cocoa text areas that omit `AXEnabled`, `AXUIElementIsAttributeSettable`
+queries whether `AXValue` is writable without copying its contents. A generic
+failure reading optional label metadata is tracked separately from an absent
+label, so identifier matching can proceed without weakening label ambiguity
+checks. AX messaging uses a bounded one-second timeout; the native fixture includes
+a 350 ms busy period during text input to exercise normal main-thread delays.
+
+The desktop host gives AppKit a bounded 1 ms event-loop interval while idle, so
+Accessibility queries can be serviced even when no input event is queued. The
+nonactivating transport uses an explicit floating window level in addition to
+panel flags. Apple's [window-level contract](https://developer.apple.com/documentation/appkit/nswindow/level-swift.property)
+places floating windows above normal-level windows. The live transport test
+checks the app under the button coordinates before posting a real mouse click.

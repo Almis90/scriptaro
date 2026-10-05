@@ -9,6 +9,7 @@ use tokio::time::{Instant, sleep};
 
 fn script(steps: Vec<Action>) -> Script {
     Script {
+        sections: Vec::new(),
         version: 1,
         name: None,
         defaults: Defaults::default(),

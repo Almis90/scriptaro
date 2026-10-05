@@ -7,6 +7,9 @@ fn examples_parse_and_round_trip() {
         include_str!("../../../examples/tutorial-macos.yaml"),
         include_str!("../../../examples/notes-macos.yaml"),
         include_str!("../../../examples/pointer.yaml"),
+        include_str!("../../../examples/window-macos.yaml"),
+        include_str!("../../../examples/sections.yaml"),
+        include_str!("../../../examples/controls-macos.yaml"),
     ] {
         let script = yaml::from_str(text).unwrap();
         assert_eq!(
@@ -66,6 +69,13 @@ fn rejects_invalid_semantics_with_step_context() {
         "{action: mouse_click, count: 0}",
         "{action: scroll, vertical: -2147483648}",
         "{action: key_press, key: s, modifiers: [primary, primary]}",
+        "{action: activate_window, window: {app: {by: name, value: App}, title: ''}}",
+        "{action: activate_window, window: {app: {by: pid, value: 0}, title: Notes}}",
+        "{action: activate_window, window: {app: {by: name, value: App}, title: Notes}, timeout_ms: 0}",
+        "{action: wait_until, condition: {kind: app_active, app: {by: name, value: ''}}}",
+        "{action: wait_until, condition: {kind: window_exists, window: {app: {by: name, value: App}, title: Notes}}, timeout_ms: 86400001}",
+        "{action: wait_until, condition: {kind: window_active, window: {app: {by: name, value: App}, title: Notes, typo: true}}}",
+        "{action: wait_until, condition: {kind: app_active, app: {by: name, value: App}, typo: true}}",
     ] {
         assert!(
             yaml::from_str(&format!("version: 1\nsteps: [{action}]")).is_err(),
@@ -89,6 +99,7 @@ fn version_and_script_size_are_bounded() {
 #[test]
 fn control_characters_are_rejected_but_newlines_tabs_and_unicode_work() {
     let mut script = Script {
+        sections: Vec::new(),
         version: 1,
         name: None,
         defaults: Default::default(),

@@ -7,9 +7,9 @@ A Rust desktop automation engine for scripted demonstrations, repetitive workflo
 and tutorials. Scripts describe generic desktop actions; the engine contains no
 editor, browser, terminal, or macOS-specific behavior.
 
-This first milestone provides a working CLI, a versioned YAML format, asynchronous
-playback, a native macOS backend, and a recording backend for simulation. It does
-not yet include a desktop GUI or native Windows/Linux input backends.
+The current implementation provides a CLI and native macOS desktop interface, a
+versioned YAML format, asynchronous playback, a macOS backend, and a recording
+backend for simulation. Native Windows/Linux input backends are not implemented.
 
 ## Run
 
@@ -22,6 +22,7 @@ cargo run -- validate examples/hello.yaml
 cargo run -- run examples/tutorial-macos.yaml --dry-run
 cargo run -- doctor
 cargo run -- apps
+cargo run -- windows --app com.apple.TextEdit
 ```
 
 For live typing, open a **blank document** in a text editor and run:
@@ -70,6 +71,14 @@ See [the script reference](docs/script-format.md) for every action and
 The tutorial requires an existing demo project and adjusted paths. The notes and
 pointer examples demonstrate uses outside programming.
 
+Use [the window recipe](examples/window-macos.yaml) to wait for and activate one
+specific document. `scriptaro windows --app com.apple.TextEdit` lists exact window
+titles (requires Accessibility). `activate_window` retains the selected native
+window identity, so switching to another document in the same app stops input,
+while renaming the selected window does not break the guard. Duplicate titles
+are errors. `wait_until` observes app focus, window existence, or window focus
+without changing the desktop. Dry runs assume those conditions are satisfied.
+
 For a runnable Rust application embedding the real engine with a simulated
 backend, use [the host example](example/README.md):
 
@@ -92,11 +101,12 @@ Open `http://127.0.0.1:4173/scriptaro/`. Use `npm run docs:dev` for guide editin
 The browser playground illustrates playback without controlling the desktop;
 the Rust host example exercises the actual engine.
 
-The GitHub source repository is public. No documentation site, registry package,
-or binary release is published. CI verifies builds on pushes and pull requests.
-The Pages workflow is manual-only, defaults to no deployment, and is reserved for
-a future explicit hosting request. All Cargo packages have `publish = false`,
-and the documentation npm package is private.
+The [GitHub source repository](https://github.com/Almis90/scriptaro) and
+[documentation site](https://almis90.github.io/scriptaro/) are public. CI verifies
+builds on pushes and pull requests. Documentation deploys through the manual
+Pages workflow on `main` with `publish` enabled. Cargo packages remain
+`publish = false`, the npm package is private, and release binaries are not yet
+published.
 
 See [contributing](CONTRIBUTING.md), [the docs workflow](docs/guide/development.md),
 and [the changelog](CHANGELOG.md).
@@ -115,7 +125,7 @@ automatic permission prompt or AppleScript dependency.
 - On Unix, signals control a running process from another terminal:
   `kill -USR1 <pid>` pauses, `kill -USR2 <pid>` resumes, and
   `kill -INT <pid>` or `kill -TERM <pid>` cancels. The CLI prints its PID.
-- The engine exposes a thread-safe controller and progress events for a future GUI.
+- The engine exposes a thread-safe controller and progress events shared by the CLI and desktop interface.
 
 Pause preserves the remaining typing/wait delay. Cancellation is terminal and
 stops further actions; it cannot undo actions already delivered. OS file-open
@@ -124,7 +134,10 @@ operation posts its down/up pair without an asynchronous interruption between th
 
 After activation or file opening, Scriptaro checks that the intended application
 is frontmost before every input operation. It stops on focus loss. This checks
-the **application**, not a specific window, document, or text field. Scripts with
+the **application**. After `activate_window`, it also checks the selected window
+before each input operation. A later `activate_app` or `open_file` replaces the
+window guard with an application guard. Neither guard identifies a text field or
+constrains mouse coordinates. Scripts with
 no activation/file-open action deliberately use the user's current focus. Focus
 checks and OS event delivery are not atomic.
 
@@ -154,9 +167,10 @@ Tests use a recording/fault-injection backend and Tokio's virtual clock; they
 never type into your desktop. CI runs formatting, Clippy, tests, and a dry run
 on macOS, Windows, and Linux. CI cannot validate live desktop input or TCC grants.
 
-An opt-in macOS integration check builds a disposable Cocoa receiver, runs native
-activation/file opening/Command+A/Unicode/Enter/Tab against it, compares the
-received text, and closes it. It requires Python 3, Xcode tools, a desktop session,
+An opt-in macOS integration check builds a disposable Cocoa receiver with two
+windows, checks native file/window readiness and Unicode input, verifies that
+renaming preserves identity and switching windows stops input, and rejects
+ambiguous titles. It requires Python 3, Xcode tools, a desktop session,
 and Accessibility access:
 
 ```sh
@@ -165,7 +179,14 @@ python3 tests/macos/smoke.py target/debug/scriptaro
 ```
 
 This live check temporarily changes application focus. It only opens its own
-temporary seed file and receiver window, and is separate from `cargo test`.
+temporary seed file and receiver windows, closes them afterwards, and is separate
+from `cargo test`. Missing permissions stop the check before opening the receiver.
+
+For repeated real-app trials, `python3 tests/macos/app_trials.py --runs 20` uses
+scratch TextEdit documents, an isolated Chrome profile with a local form, and a
+temporary Terminal coding demonstration. It checks exact results and retakes,
+stops on failure, and saves reports under `target/verification/`. Leave the desktop
+untouched during playback. See the [trial setup and limits](docs/guide/development.md#running-the-real-app-trials).
 
 ## Current boundaries
 
@@ -177,18 +198,62 @@ temporary seed file and receiver window, and is separate from `cargo test`.
 - Text is emitted one Unicode scalar at a time. Newline and tab emit actual
   Enter/Tab key events. Some applications, secure fields, or input methods may
   ignore synthetic/Unicode events. Shortcuts use physical US key positions.
+- Native input delivery is asynchronous. Put an explicit `wait` after typing or
+  clearing a field before changing focus or invoking a control; otherwise the
+  next Accessibility operation can overtake queued keystrokes. A delay is not an
+  application acknowledgement: verify the result in the target application.
 - Editor auto-indent, bracket pairing, completion, and format-on-type may alter
   prepared text. Configure the editor for a recording; no editor-specific
   corrections are built into the engine.
-- File-open completion confirms native dispatch and application focus, not
-  document readiness. Add explicit waits for loading. Browser/server readiness
-  and app-specific commands belong in future integrations.
+- File-open completion confirms native dispatch and application focus. Use
+  `wait_until`/`activate_window` for an expected window; its existence/focus does
+  not prove document content is ready. Control readiness can check existence,
+  enabled state and focus; browser/server readiness remains future work.
+- Window discovery uses exact titles exposed through Accessibility. Apps that
+  do not expose the required attributes fail explicitly. Accessibility messages
+  have one-second timeouts, with a two-second discovery budget and a 256-window limit.
+  Native calls cannot be interrupted; deadlines and cancellation are checked
+  after synchronous backend queries return.
 - Mouse coordinates are desktop logical points; scripts are sensitive to window
   placement and display arrangement. Dragging and held keys are not implemented.
 - `serde_yaml` is used as requested but is unmaintained. Parsing is isolated in
   `scriptaro_core::yaml`. Scripts are bounded and strictly validated, but the
   parser is not a security sandbox for adversarial input.
 
-The next milestones are native input smoke coverage across target apps, a desktop
-GUI backed by the same engine, richer accessibility selectors, reusable recipes,
-and independent Windows/X11/Wayland backend work.
+Current development focuses on the CLI: structured output for plans and discovery,
+saved run reports, and clearer diagnostics for scripted workflows. Further UI
+work is deferred; the existing macOS host remains available. Broader application
+and display trials, distribution/signing, and independent Windows/X11/Wayland
+backends remain later milestones. VS Code integration comes last.
+
+## Controls, retakes and desktop playback
+
+Scripts can select controls by role and exact identifier/label, wait for their readiness, focus fields and invoke buttons. Named sections have explicit setup, readiness checks and optional reset actions for retakes. The macOS desktop host shares the same engine as the CLI.
+
+```sh
+cargo run --locked -p scriptaro-desktop -- examples/sections.yaml
+cargo run --locked -- sections examples/sections.yaml
+cargo run --locked -- run examples/sections.yaml --section Introduction --retake --dry-run
+```
+
+Build a local macOS app with `./scripts/build-desktop.sh` → `target/Scriptaro.app`. See [desktop usage](docs/guide/desktop.md) and [control/section format](docs/script-format.md). Native Windows/Linux views and backends remain future work. No VS Code extension is required or implemented.
+
+## Script preparation
+
+Use **New from recipe… → basic** and **Build actions…** to build a script with
+forms. Add, edit, duplicate, reorder and remove actions without writing YAML.
+You can also edit YAML in **Edit script** and
+insert actions with **Pick target…**. **Validate**, **Plan & log**, **Save** and
+**Save as…** support preparation without leaving the app. Invalid drafts cannot
+play; unsaved changes and external file edits are protected. Or create a starter
+from the CLI:
+
+```sh
+scriptaro recipes
+scriptaro init take.yaml --recipe text-entry
+scriptaro plan take.yaml --section 'Write text' --retake
+```
+
+Starters cover a basic wait, text entry, two-field forms and application switching. Replace the
+selectors and text, inspect the reset, and rehearse in simulation. Generation
+never runs a script or overwrites a file. See [Prepare a script](docs/guide/preparation.md).

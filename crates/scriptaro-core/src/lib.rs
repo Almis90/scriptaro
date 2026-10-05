@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 
 mod model;
+pub mod recipes;
+mod sections;
 mod validation;
 pub mod yaml;
 

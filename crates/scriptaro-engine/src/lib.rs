@@ -3,8 +3,12 @@
 mod control;
 pub use control::{ControlState, PlaybackController};
 
-use scriptaro_core::{Action, AppSelector, Script, ValidationError};
-use scriptaro_platform::{BackendError, DesktopBackend, PendingOpen, required_capabilities};
+use scriptaro_core::{
+    Action, AppSelector, Condition, ControlSelector, Script, ValidationError, WindowSelector,
+};
+use scriptaro_platform::{
+    BackendError, ControlTarget, DesktopBackend, PendingOpen, WindowTarget, required_capabilities,
+};
 use std::{path::PathBuf, time::Duration};
 use thiserror::Error;
 use tokio::{
@@ -82,8 +86,17 @@ pub enum StepError {
     Backend(#[from] BackendError),
     #[error("timed out waiting for {0}")]
     Timeout(&'static str),
+    #[error("timed out after {timeout_ms} ms waiting for {condition}")]
+    ReadinessTimeout {
+        condition: &'static str,
+        timeout_ms: u64,
+    },
     #[error("focus left the intended application ({0:?}); playback stopped")]
     FocusLost(AppSelector),
+    #[error("focus left the selected window; playback stopped")]
+    WindowFocusLost,
+    #[error("selected control is no longer focused and enabled; playback stopped")]
+    ControlFocusLost,
     #[error("playback cancelled")]
     Cancelled,
 }
@@ -96,6 +109,8 @@ pub struct Engine<'a> {
     events: broadcast::Sender<PlaybackEvent>,
     observed_state: ControlState,
     focus: Option<AppSelector>,
+    window_focus: Option<WindowTarget>,
+    control_focus: Option<ControlTarget>,
 }
 
 impl<'a> Engine<'a> {
@@ -110,6 +125,8 @@ impl<'a> Engine<'a> {
             events,
             observed_state: ControlState::Running,
             focus: None,
+            window_focus: None,
+            control_focus: None,
         }
     }
 
@@ -167,6 +184,8 @@ impl<'a> Engine<'a> {
 
     /// A run consumes its engine. Create a new engine/controller to replay a script.
     pub async fn run(mut self, script: &Script) -> Result<RunReport, EngineError> {
+        let prepared = script.prepare(None, false)?;
+        let script = &prepared;
         self.preflight(script)?;
         if !self.options.base_dir.is_absolute() {
             self.options.base_dir = std::env::current_dir()
@@ -318,25 +337,179 @@ impl<'a> Engine<'a> {
         }
     }
 
+    async fn poll_again(&mut self, deadline: Instant) {
+        tokio::select! {
+            _ = self.commands.changed() => {},
+            _ = tokio::time::sleep_until(deadline.min(Instant::now() + TICK)) => {},
+        }
+    }
+
+    fn check_deadline(
+        deadline: Instant,
+        condition: &'static str,
+        timeout_ms: u64,
+    ) -> Result<(), StepError> {
+        if Instant::now() >= deadline {
+            Err(StepError::ReadinessTimeout {
+                condition,
+                timeout_ms,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn wait_until(
+        &mut self,
+        condition: &Condition,
+        timeout_ms: u64,
+    ) -> Result<(), StepError> {
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        loop {
+            self.checkpoint().await?;
+            Self::check_deadline(deadline, condition.kind(), timeout_ms)?;
+            let satisfied = self.backend.observe(condition)?;
+            // A slow native query must not turn an expired deadline into success.
+            Self::check_deadline(deadline, condition.kind(), timeout_ms)?;
+            if satisfied {
+                return Ok(());
+            }
+            self.poll_again(deadline).await;
+        }
+    }
+
+    async fn activate_window(
+        &mut self,
+        window: &WindowSelector,
+        timeout_ms: u64,
+    ) -> Result<(), StepError> {
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let target = loop {
+            self.checkpoint().await?;
+            Self::check_deadline(deadline, "window_exists", timeout_ms)?;
+            if let Some(target) = self.backend.activate_window(window)? {
+                break target;
+            }
+            self.poll_again(deadline).await;
+        };
+        // Once dispatched, never repeat an activation request. Observe only.
+        loop {
+            self.checkpoint().await?;
+            Self::check_deadline(deadline, "window_active", timeout_ms)?;
+            let active = self.backend.is_window_active(&target)?;
+            Self::check_deadline(deadline, "window_active", timeout_ms)?;
+            if active {
+                self.focus = Some(target.app.clone());
+                self.window_focus = Some(target);
+                self.control_focus = None;
+                return Ok(());
+            }
+            self.poll_again(deadline).await;
+        }
+    }
+
+    async fn control_action(
+        &mut self,
+        control: &ControlSelector,
+        timeout_ms: u64,
+        invoke: bool,
+    ) -> Result<(), StepError> {
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        let target = loop {
+            self.checkpoint().await?;
+            Self::check_deadline(deadline, "control_enabled", timeout_ms)?;
+            if invoke {
+                if self.backend.invoke_control(control)? {
+                    // An invocation can change focus or close its window. Preserve
+                    // previous guards: subsequent input must explicitly retarget.
+                    Self::check_deadline(deadline, "control_invocation", timeout_ms)?;
+                    return Ok(());
+                }
+            } else if let Some(target) = self.backend.focus_control(control)? {
+                break target;
+            }
+            self.poll_again(deadline).await;
+        };
+        loop {
+            self.checkpoint().await?;
+            Self::check_deadline(deadline, "control_focused", timeout_ms)?;
+            let ready = self.backend.is_control_focused(&target)?;
+            Self::check_deadline(deadline, "control_focused", timeout_ms)?;
+            if ready {
+                self.focus = Some(target.window.app.clone());
+                self.window_focus = Some(target.window.clone());
+                self.control_focus = Some(target);
+                return Ok(());
+            }
+            self.poll_again(deadline).await;
+        }
+    }
+
     async fn before_input(&mut self) -> Result<(), StepError> {
-        self.checkpoint().await?;
-        if let Some(app) = &self.focus {
-            if !self.backend.is_app_active(app)? {
-                return Err(StepError::FocusLost(app.clone()));
+        loop {
+            self.checkpoint().await?;
+            if let Some(app) = &self.focus {
+                if !self.backend.is_app_active(app)? {
+                    return Err(StepError::FocusLost(app.clone()));
+                }
+            }
+            if let Some(window) = &self.window_focus {
+                if !self.backend.is_window_active(window)? {
+                    return Err(StepError::WindowFocusLost);
+                }
+            }
+            if let Some(control) = &self.control_focus {
+                if !self.backend.is_control_focused(control)? {
+                    return Err(StepError::ControlFocusLost);
+                }
+            }
+            // Remote queries can take time. Honor a control change received while
+            // querying; after a pause, repeat the focus checks before sending input.
+            // Do not pump native events after validating focus: that could itself
+            // change focus. A non-running state loops through a fresh checkpoint.
+            if self.controller.state() == ControlState::Running {
+                return Ok(());
             }
         }
-        Ok(())
     }
 
     async fn execute(&mut self, action: &Action, script: &Script) -> Result<(), StepError> {
         match action {
+            Action::FocusControl {
+                control,
+                timeout_ms,
+            }
+            | Action::InvokeControl {
+                control,
+                timeout_ms,
+            } => {
+                self.control_action(
+                    control,
+                    timeout_ms.unwrap_or(script.defaults.timeout_ms),
+                    matches!(action, Action::InvokeControl { .. }),
+                )
+                .await?;
+            }
             Action::Wait { duration_ms } => self.delay(self.scaled(*duration_ms)).await?,
+            Action::WaitUntil {
+                condition,
+                timeout_ms,
+            } => {
+                self.wait_until(condition, timeout_ms.unwrap_or(script.defaults.timeout_ms))
+                    .await?;
+            }
+            Action::ActivateWindow { window, timeout_ms } => {
+                self.activate_window(window, timeout_ms.unwrap_or(script.defaults.timeout_ms))
+                    .await?;
+            }
             Action::ActivateApp { app, timeout_ms } => {
                 let deadline = Instant::now()
                     + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
                 let target = self.backend.activate_app(app)?;
                 self.ready(&target, deadline).await?;
                 self.focus = Some(target);
+                self.window_focus = None;
+                self.control_focus = None;
             }
             Action::OpenFile {
                 path,
@@ -350,6 +523,8 @@ impl<'a> Engine<'a> {
                 let target = self.await_open(pending, deadline).await?;
                 self.ready(&target, deadline).await?;
                 self.focus = Some(target);
+                self.window_focus = None;
+                self.control_focus = None;
             }
             Action::TypeText { text, interval_ms } => {
                 let interval =

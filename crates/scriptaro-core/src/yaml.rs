@@ -25,3 +25,16 @@ pub fn to_string(script: &Script) -> Result<String, ScriptError> {
     script.validate()?;
     Ok(serde_yaml::to_string(script)?)
 }
+
+/// Serialize an insertion fragment without rewriting the surrounding document.
+pub fn actions_to_string(actions: &[crate::Action]) -> Result<String, ScriptError> {
+    Script {
+        version: 1,
+        name: None,
+        defaults: Default::default(),
+        steps: actions.to_vec(),
+        sections: vec![],
+    }
+    .validate()?;
+    Ok(serde_yaml::to_string(actions)?)
+}

@@ -1,7 +1,7 @@
 name: Deploy documentation (manual only)
 
 # Deliberately no push, tag, schedule, or workflow_run trigger.
-# Pages stays unconfigured until documentation hosting is explicitly requested.
+# Publishing requires an explicit manual dispatch with the publish input enabled.
 on:
   workflow_dispatch:
     inputs:

@@ -24,7 +24,7 @@ const api = join(dist, 'api')
 mkdirSync(api, { recursive: true })
 cpSync(join(metadata.target_directory, 'doc'), api, { recursive: true })
 
-for (const name of ['scriptaro_core', 'scriptaro_platform', 'scriptaro_engine', 'scriptaro_platform_macos']) {
+for (const name of ['scriptaro_core', 'scriptaro_platform', 'scriptaro_engine', 'scriptaro_platform_macos', 'scriptaro_desktop']) {
   if (!existsSync(join(api, name, 'index.html'))) throw new Error(`Missing API reference: ${name}`)
 }
 writeFileSync(join(dist, '.nojekyll'), '')

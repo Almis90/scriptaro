@@ -29,8 +29,10 @@ export default defineConfig({
         { text: 'Interactive playground', link: '/playground' },
       ] },
       { text: 'Use Scriptaro', items: [
+        { text: 'Prepare a script', link: '/guide/preparation' },
         { text: 'Script format', link: '/script-format' },
         { text: 'Playback and controls', link: '/guide/playback' },
+        { text: 'Desktop interface', link: '/guide/desktop' },
         { text: 'macOS setup', link: '/guide/macos' },
       ] },
       { text: 'Build with Scriptaro', items: [

@@ -1,6 +1,6 @@
 # macOS setup
 
-Scriptaro uses native AppKit and CoreGraphics APIs. There is no AppleScript
+Scriptaro uses native AppKit, Accessibility and CoreGraphics APIs. There is no AppleScript
 foundation, shell-driven keyboard injection, or screen-recording dependency.
 
 ## Permissions
@@ -13,7 +13,7 @@ The command reports capabilities and permissions without changing them.
 
 | Permission | Used for |
 | --- | --- |
-| Accessibility | Keyboard and pointer input |
+| Accessibility | Keyboard/pointer input, window discovery and window focus checks |
 | Post events | Permission for Quartz input event delivery |
 | Input Monitoring | Optional global Control–Option–Escape stop shortcut |
 
@@ -38,6 +38,18 @@ Use a listed bundle identifier, exact application name, or process ID:
 Activation requires an already-running app. Multiple matching instances produce
 an ambiguity error; use a PID to disambiguate them. Native file opening can launch
 an installed file handler and returns the process actually handling the request.
+
+## Select a window
+
+```sh
+cargo run --locked -- windows --app com.apple.TextEdit
+```
+
+Use the exact displayed title in `activate_window` or a `wait_until` condition.
+The app must expose its windows through Accessibility. Duplicate matching titles
+are rejected; rename the intended document to disambiguate it. Once selected,
+the window is tracked by native identity even if its title changes. See the
+[window recipe](/guide/examples#specific-window).
 
 ## Prepare reliable input
 

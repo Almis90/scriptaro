@@ -1,0 +1,23 @@
+# Prepare a blank TextEdit document named "Scriptaro Notes" before playback.
+# Inspect exact titles with: scriptaro windows --app com.apple.TextEdit
+# Dry run: scriptaro run examples/window-macos.yaml --dry-run
+version: 1
+name: Write into a specific notes window
+defaults:
+  character_delay_ms: 60
+  timeout_ms: 10000
+steps:
+  - action: wait_until
+    condition:
+      kind: window_exists
+      window:
+        app: { by: identifier, value: com.apple.TextEdit }
+        title: Scriptaro Notes
+  - action: activate_window
+    window:
+      app: { by: identifier, value: com.apple.TextEdit }
+      title: Scriptaro Notes
+  - action: type_text
+    text: |-
+      Meeting notes
+      This sequence targets one window, even if other documents are open.

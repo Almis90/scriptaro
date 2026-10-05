@@ -1,0 +1,57 @@
+# Inspect exact labels/roles with `controls` and replace every REPLACE_WITH value.
+# Filling a form and submitting it are separate takes; no button is invoked by this recipe.
+version: 1
+name: Fill two fields
+sections:
+  - name: Fill form
+    setup:
+      - action: activate_window
+        window: &window
+          app: {by: identifier, value: REPLACE_WITH_APP_ID}
+          title: REPLACE_WITH_WINDOW_TITLE
+    requires:
+      - kind: control_enabled
+        control: &first
+          window: *window
+          role: text_field
+          label: REPLACE_WITH_FIRST_FIELD_LABEL
+      - kind: control_enabled
+        control: &second
+          window: *window
+          role: text_area
+          label: REPLACE_WITH_SECOND_FIELD_LABEL
+    # Reset changes only these two explicitly selected fields.
+    reset:
+      - action: activate_window
+        window: *window
+      - action: focus_control
+        control: *first
+      - action: key_press
+        key: a
+        modifiers: [primary]
+      - action: key_press
+        key: backspace
+      - action: wait
+        duration_ms: 200
+      - action: focus_control
+        control: *second
+      - action: key_press
+        key: a
+        modifiers: [primary]
+      - action: key_press
+        key: backspace
+      - action: wait
+        duration_ms: 200
+    steps:
+      - action: focus_control
+        control: *first
+      - action: type_text
+        text: Replace first field text
+      - action: wait
+        duration_ms: 200
+      - action: focus_control
+        control: *second
+      - action: type_text
+        text: "Replace second field text.\nA second line."
+      - action: wait
+        duration_ms: 200

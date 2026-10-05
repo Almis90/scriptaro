@@ -28,7 +28,9 @@ pause immediately. Pausing does not undo an OS request already sent.
 | Action | Required fields | Optional fields |
 | --- | --- | --- |
 | `wait` | `duration_ms` | — |
+| `wait_until` | `condition` | `timeout_ms` |
 | `activate_app` | `app` | `timeout_ms` |
+| `activate_window` | `window` | `timeout_ms` |
 | `open_file` | `path` | `app`, `timeout_ms` |
 | `type_text` | `text` | `interval_ms` |
 | `key_press` | `key` | `modifiers` (default `[]`) |
@@ -52,7 +54,8 @@ the actual returned process, even if a different instance was requested.
 
 `activate_app` only activates a running app, then waits for it to become frontmost.
 Activation refusal, ambiguity, disappearance, and timeout are errors. No action
-is silently skipped or automatically retried.
+is silently skipped. Readiness is polled; dispatched activation and input actions
+are never automatically repeated.
 
 ## Application selectors
 
@@ -65,6 +68,62 @@ app: { by: pid, value: 12345 }
 Use exactly one selector. Identifiers are native-backend identifiers, names match
 exactly, and PIDs are positive 32-bit signed integers. `scriptaro apps` lists
 usable values. Multiple matches are an error; PIDs can disambiguate them.
+
+## Window targeting and readiness
+
+Window selectors combine an application selector and an exact, case-sensitive,
+nonempty `title`. Discover titles with `scriptaro windows --app com.apple.TextEdit`,
+`--name TextEdit`, or `--pid 12345`; choose exactly one application selector.
+Output quotes/escapes titles to preserve whitespace. Use the actual title in YAML.
+If multiple windows match, give the intended document a unique title.
+
+```yaml
+- action: wait_until
+  condition:
+    kind: window_exists
+    window:
+      app: { by: identifier, value: com.apple.TextEdit }
+      title: Scriptaro Notes
+  timeout_ms: 10000
+- action: activate_window
+  window:
+    app: { by: identifier, value: com.apple.TextEdit }
+    title: Scriptaro Notes
+- action: type_text
+  text: Hello from the selected window.
+```
+
+`activate_window` waits for a unique match, requests activation once, and waits
+for that window to be focused in the frontmost app. Both phases share one timeout.
+On macOS it also restores a minimized window. It does not launch a missing app.
+The engine then guards the actual native window before every character, key,
+pointer, click, and scroll action. Title changes do not change this identity.
+Closing the window or switching to another window stops subsequent input. A later
+`activate_app`, `open_file`, or `activate_window` explicitly replaces the target.
+
+`wait_until` supports these read-only conditions:
+
+| `condition.kind` | Required selector | Satisfied when |
+| --- | --- | --- |
+| `app_active` | `app` | The uniquely identified running app is frontmost |
+| `window_exists` | `window` | Exactly one matching window is exposed by the app |
+| `window_active` | `window` | Exactly one match is the focused window of the frontmost app |
+
+Missing apps/windows are unsatisfied conditions, so playback waits until the
+timeout. Ambiguity, missing permissions, unsupported attributes, and native
+communication failures stop immediately with an error. `timeout_ms` defaults to
+`defaults.timeout_ms`; it must be positive and is never scaled by playback speed.
+Pauses count toward readiness deadlines; cancellation still interrupts waiting.
+Native calls are bounded but cannot be preempted, so deadlines are checked before
+and after queries rather than being hard real-time guarantees.
+
+Waiting does not activate anything, send input, or change the current focus guard.
+To establish a window guard, use `activate_window`. Simulation assumes every
+condition succeeds; it does not verify actual application readiness.
+
+A window check does not identify a text field, verify document contents, detect
+all modal dialogs, or constrain a click to the window's bounds. Focus checking
+and input delivery remain separate OS operations.
 
 ## Text and keys
 
@@ -110,3 +169,93 @@ script sends them to a terminal and presses Enter.
 CLI exit codes: `0` success, `1` load/validation/playback failure, `2` argument
 usage errors, `130` cancelled playback. `doctor` is informational and reports
 missing permissions without treating them as a command failure.
+
+## Control selectors and readiness
+
+Controls are exact metadata matches within an exact window. Supported portable roles are `text_field`, `text_area`, `button`, `check_box`, and `combo_box`. Supply at least one nonempty `identifier` or `label`; if both are supplied, both must match. Multiple matches fail. There is no positional fallback.
+
+```yaml
+- action: activate_window
+  window: &window
+    app: { by: identifier, value: com.example.Notes }
+    title: Meeting notes
+- action: wait_until
+  condition:
+    kind: control_enabled
+    control: &editor
+      window: *window
+      role: text_area
+      identifier: notes-editor
+- action: focus_control
+  control: *editor
+  timeout_ms: 5000
+- action: type_text
+  text: Prepared notes
+```
+
+Discover metadata using:
+
+```sh
+scriptaro controls --app com.example.Notes --window 'Meeting notes'
+```
+
+`control_exists`, `control_enabled`, and `control_focused` are read-only conditions. They never change the current guard. `focus_control` requires the containing window already be active, waits for an existing enabled control, requests focus once, then observes it. It retains a control identity and checks that it remains focused and enabled before subsequent input, including each character. Explicit app/window activation or file opening clears the previous control guard.
+
+`invoke_control` supports buttons and check boxes using the native accessibility press action. It waits for a unique enabled control in an already active window and invokes it once. It never retries a dispatched action or claims that a resulting network request or save has completed; follow it with an appropriate readiness condition. Existing focus guards remain in place, so retarget explicitly when invocation changes focus.
+
+On macOS, identifiers map to `AXIdentifier`. A label is a nonempty `AXTitle`, falling back to `AXDescription`. Roles map to native AX roles. Discovery reads metadata, never `AXValue` or field contents, and excludes secure text fields. Custom controls or applications with incomplete Accessibility support may be unavailable. A focused, enabled field is not proof that its contents are editable or that typing was accepted.
+
+Traversal is limited to 2,048 elements, 64 levels and a two-second query budget, with one-second native messaging timeouts. Crossing a limit fails rather than returning a potentially ambiguous partial match. The query budget is checked between elements; an element’s remaining native calls can exceed it. Cancellation is observed after synchronous backend queries return; checks and event posting cannot be atomic against changes in another application.
+
+Native keystrokes are queued asynchronously. Before moving focus to another
+control or pressing a button through Accessibility, add an explicit `wait`
+after typing or clearing a field. The local Chrome trial uses 200 ms at these
+boundaries. This is a tested pacing choice, not a delivery acknowledgement or a
+guarantee for arbitrary applications. `type_text` adds no delay after its last
+character, and control readiness does not verify field contents.
+
+## Named sections and retakes
+
+Use either top-level `steps` or `sections`. Existing version 1 scripts remain valid. Section names must be unique. A section contains optional `setup`, optional `requires` conditions, optional `reset`, and nonempty `steps`.
+
+```yaml
+version: 1
+sections:
+  - name: Introduction
+    setup:
+      - action: activate_app
+        app: { by: identifier, value: com.example.Notes }
+    requires:
+      - kind: app_active
+        app: { by: identifier, value: com.example.Notes }
+    steps:
+      - action: wait
+        duration_ms: 1000
+    reset: []
+```
+
+A full run executes each section's setup → readiness → steps, in order. A selected section executes only that section; it must establish its own starting state. An explicit retake executes reset → setup → readiness → steps. Reset can itself contain activation, focus and wait actions. There is no automatic rollback or inference of an inverse action.
+
+A retake requires an explicitly authored reset. An empty reset is allowed when no restoration is necessary or when the author intentionally relies on external restoration. Reset actions are not run during normal playback. All branches, including resets, are structurally validated before execution; capabilities and file existence are preflighted for the selected plan. The combined document remains limited to 10,000 actions (including setup, reset and readiness checks).
+
+```sh
+scriptaro sections examples/sections.yaml
+scriptaro run examples/sections.yaml --section Introduction --dry-run
+scriptaro run examples/sections.yaml --section Introduction --retake --dry-run
+```
+
+The engine compiles sections to ordinary actions, so reported step numbers refer to the expanded plan. Missing sections, duplicate names, and retakes without an explicit reset fail before effects. Retakes start a fresh run; a stopped keystroke sequence is never silently continued. These primitives are application-independent and do not require an editor extension.
+
+
+On macOS, some Cocoa text areas expose `AXDescription` but fail when it is read.
+Discovery reports `label_available=false` for these controls. Exact identifier
+selection still works; label-based selection fails if such a control could match,
+so an unreadable label cannot hide ambiguity. Permission, messaging and invalid
+object errors still stop discovery.
+
+When an `AXTextArea` omits `AXEnabled`, readiness requires positive evidence that
+`AXValue` is settable. This checks editability without reading or writing contents.
+In this fallback, read-only text areas remain unavailable for `focus_control`. Other control roles
+must expose their enabled state explicitly. The per-message one-second timeout allows
+ordinary AppKit event handling beyond 250 ms; it is still bounded and dispatched
+actions are never retried.

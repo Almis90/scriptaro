@@ -9,6 +9,23 @@ pub struct Script {
     pub name: Option<String>,
     #[serde(default)]
     pub defaults: Defaults,
+    #[serde(default)]
+    pub steps: Vec<Action>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<Section>,
+}
+
+/// Each section is an independently prepared take. Reset runs only on an explicit retake.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Section {
+    pub name: String,
+    #[serde(default)]
+    pub setup: Vec<Action>,
+    #[serde(default)]
+    pub reset: Option<Vec<Action>>,
+    #[serde(default)]
+    pub requires: Vec<Condition>,
     pub steps: Vec<Action>,
 }
 
@@ -45,11 +62,89 @@ pub enum AppSelector {
     Pid(u32),
 }
 
+/// An exact, case-sensitive window title within one application.
+/// Multiple matches are an error; backends must never choose an arbitrary window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowSelector {
+    pub app: AppSelector,
+    pub title: String,
+}
+
+/// Portable Accessibility roles. Backends map these to native role names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlRole {
+    TextField,
+    TextArea,
+    Button,
+    CheckBox,
+    ComboBox,
+}
+
+/// Exact metadata match inside a uniquely selected window; never matches by index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlSelector {
+    pub window: WindowSelector,
+    pub role: ControlRole,
+    #[serde(default)]
+    pub identifier: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// Read-only observations. Waiting never activates an application or changes focus.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Condition {
+    ControlExists { control: ControlSelector },
+    ControlEnabled { control: ControlSelector },
+    ControlFocused { control: ControlSelector },
+    AppActive { app: AppSelector },
+    WindowExists { window: WindowSelector },
+    WindowActive { window: WindowSelector },
+}
+
+impl Condition {
+    /// A content-free label suitable for progress and error messages.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::ControlExists { .. } => "control_exists",
+            Self::ControlEnabled { .. } => "control_enabled",
+            Self::ControlFocused { .. } => "control_focused",
+            Self::AppActive { .. } => "app_active",
+            Self::WindowExists { .. } => "window_exists",
+            Self::WindowActive { .. } => "window_active",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    FocusControl {
+        control: ControlSelector,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+    InvokeControl {
+        control: ControlSelector,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
     Wait {
         duration_ms: u64,
+    },
+    WaitUntil {
+        condition: Condition,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+    ActivateWindow {
+        window: WindowSelector,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
     },
     ActivateApp {
         app: AppSelector,
@@ -100,7 +195,11 @@ impl Action {
     /// Stable name for logs and events; deliberately excludes user content.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::FocusControl { .. } => "focus_control",
+            Self::InvokeControl { .. } => "invoke_control",
             Self::Wait { .. } => "wait",
+            Self::WaitUntil { .. } => "wait_until",
+            Self::ActivateWindow { .. } => "activate_window",
             Self::ActivateApp { .. } => "activate_app",
             Self::OpenFile { .. } => "open_file",
             Self::TypeText { .. } => "type_text",

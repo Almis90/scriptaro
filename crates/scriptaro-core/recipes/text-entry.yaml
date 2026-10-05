@@ -1,0 +1,38 @@
+# Replace the app, window and control selectors using `apps`, `windows`, `controls`.
+# This recipe writes to an existing editable field. Review the reset before retaking.
+version: 1
+name: Text entry
+sections:
+  - name: Write text
+    setup:
+      - action: activate_window
+        window: &window
+          app: {by: identifier, value: REPLACE_WITH_APP_ID}
+          title: REPLACE_WITH_WINDOW_TITLE
+      - action: focus_control
+        control: &field
+          window: *window
+          role: text_area
+          identifier: REPLACE_WITH_CONTROL_ID
+    requires:
+      - kind: control_focused
+        control: *field
+    # Explicitly replaces all contents of the selected field on a retake.
+    reset:
+      - action: activate_window
+        window: *window
+      - action: focus_control
+        control: *field
+      - action: key_press
+        key: a
+        modifiers: [primary]
+      - action: key_press
+        key: backspace
+      - action: wait
+        duration_ms: 200
+    steps:
+      - action: type_text
+        text: "Replace this prepared text.\nA second line."
+      # Input posting is asynchronous; wait before changing controls or applications.
+      - action: wait
+        duration_ms: 200

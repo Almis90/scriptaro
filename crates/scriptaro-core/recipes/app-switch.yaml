@@ -1,0 +1,24 @@
+# A generic two-application demonstration. Replace selectors before desktop playback.
+# Add input only after choosing the correct window/control in each application.
+version: 1
+name: Switch applications
+sections:
+  - name: Demonstrate
+    setup:
+      - action: activate_window
+        window: &first
+          app: {by: identifier, value: REPLACE_WITH_FIRST_APP_ID}
+          title: REPLACE_WITH_FIRST_WINDOW_TITLE
+    # This initial recipe only changes focus; add a reset if you add state-changing input.
+    reset: []
+    steps:
+      - action: wait
+        duration_ms: 1000
+      - action: activate_window
+        window:
+          app: {by: identifier, value: REPLACE_WITH_SECOND_APP_ID}
+          title: REPLACE_WITH_SECOND_WINDOW_TITLE
+      - action: wait
+        duration_ms: 1000
+      - action: activate_window
+        window: *first

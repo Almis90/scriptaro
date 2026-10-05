@@ -1,4 +1,4 @@
-use crate::{Action, AppSelector, Script};
+use crate::{Action, AppSelector, Condition, ControlSelector, Script, WindowSelector};
 use thiserror::Error;
 
 pub const MAX_SCRIPT_BYTES: usize = 4 * 1024 * 1024;
@@ -13,7 +13,7 @@ pub struct ValidationError {
 }
 
 impl ValidationError {
-    fn at(location: impl Into<String>, message: impl Into<String>) -> Self {
+    pub(crate) fn at(location: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             location: location.into(),
             message: message.into(),
@@ -53,6 +53,36 @@ fn app(value: &AppSelector, location: &str) -> Result<(), ValidationError> {
     }
 }
 
+fn window(value: &WindowSelector, location: &str) -> Result<(), ValidationError> {
+    app(&value.app, location)?;
+    if value.title.trim().is_empty() || value.title.contains('\0') {
+        return Err(ValidationError::at(
+            location,
+            "window title must be nonempty and contain no NUL",
+        ));
+    }
+    Ok(())
+}
+
+fn control(value: &ControlSelector, location: &str) -> Result<(), ValidationError> {
+    window(&value.window, location)?;
+    if value.identifier.is_none() && value.label.is_none() {
+        return Err(ValidationError::at(
+            location,
+            "control requires an identifier or label",
+        ));
+    }
+    for value in [&value.identifier, &value.label].into_iter().flatten() {
+        if value.trim().is_empty() || value.contains('\0') {
+            return Err(ValidationError::at(
+                location,
+                "control metadata must be nonempty without NUL",
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl Script {
     /// Validate the entire script before any desktop effects occur.
     pub fn validate(&self) -> Result<(), ValidationError> {
@@ -61,6 +91,9 @@ impl Script {
                 "version",
                 "only script version 1 is supported",
             ));
+        }
+        if !self.sections.is_empty() {
+            return self.validate_sections();
         }
         if self.steps.is_empty() || self.steps.len() > MAX_STEPS {
             return Err(ValidationError::at(
@@ -79,6 +112,59 @@ impl Script {
             let location = format!("steps[{}] ({})", index + 1, step.kind());
             match step {
                 Action::Wait { duration_ms } => duration(*duration_ms, &location, false)?,
+                Action::WaitUntil {
+                    condition,
+                    timeout_ms,
+                } => {
+                    match condition {
+                        Condition::ControlExists { control: selector }
+                        | Condition::ControlEnabled { control: selector }
+                        | Condition::ControlFocused { control: selector } => {
+                            control(selector, &location)?
+                        }
+                        Condition::AppActive { app: selector } => app(selector, &location)?,
+                        Condition::WindowExists { window: selector }
+                        | Condition::WindowActive { window: selector } => {
+                            window(selector, &location)?
+                        }
+                    }
+                    if let Some(ms) = timeout_ms {
+                        duration(*ms, &location, true)?;
+                    }
+                }
+                Action::FocusControl {
+                    control: selector,
+                    timeout_ms,
+                }
+                | Action::InvokeControl {
+                    control: selector,
+                    timeout_ms,
+                } => {
+                    control(selector, &location)?;
+                    if let Some(ms) = timeout_ms {
+                        duration(*ms, &location, true)?;
+                    }
+                    if matches!(step, Action::InvokeControl { .. })
+                        && !matches!(
+                            selector.role,
+                            crate::ControlRole::Button | crate::ControlRole::CheckBox
+                        )
+                    {
+                        return Err(ValidationError::at(
+                            &location,
+                            "invoke_control supports buttons and check boxes",
+                        ));
+                    }
+                }
+                Action::ActivateWindow {
+                    window: selector,
+                    timeout_ms,
+                } => {
+                    window(selector, &location)?;
+                    if let Some(ms) = timeout_ms {
+                        duration(*ms, &location, true)?;
+                    }
+                }
                 Action::ActivateApp {
                     app: selector,
                     timeout_ms,

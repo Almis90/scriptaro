@@ -1,4 +1,4 @@
-use crate::{ffi, keyboard};
+use crate::{accessibility::Element, ffi, keyboard};
 use block2::RcBlock;
 use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
 use core_graphics::{
@@ -17,10 +17,12 @@ use objc2_app_kit::{
     NSApplicationActivationOptions, NSRunningApplication, NSWorkspace, NSWorkspaceOpenConfiguration,
 };
 use objc2_foundation::{NSArray, NSError, NSString, NSURL};
-use scriptaro_core::{AppSelector, Key, Modifier, MouseButton};
+use scriptaro_core::{
+    AppSelector, Condition, ControlSelector, Key, Modifier, MouseButton, WindowSelector,
+};
 use scriptaro_platform::{
-    ApplicationInfo, BackendError, BackendResult, Capability, DesktopBackend, PendingOpen,
-    PermissionStatus,
+    ApplicationInfo, BackendError, BackendResult, Capability, ControlInfo, ControlTarget,
+    DesktopBackend, PendingOpen, PermissionStatus, WindowInfo, WindowTarget,
 };
 use std::{path::Path, sync::Mutex, time::Duration};
 
@@ -30,6 +32,8 @@ pub struct MacOsBackend {
     /// Enforces the owning-thread contract at construction and through !Send/!Sync.
     _main_thread: MainThreadMarker,
     emergency_hotkey_available: bool,
+    windows: Vec<(WindowTarget, Element)>,
+    controls: Vec<(ControlTarget, Element)>,
 }
 
 fn native(message: &str) -> BackendError {
@@ -45,6 +49,8 @@ impl MacOsBackend {
             source: None,
             _main_thread: main_thread,
             emergency_hotkey_available: ffi::can_listen(),
+            windows: Vec::new(),
+            controls: Vec::new(),
         })
     }
 
@@ -54,6 +60,72 @@ impl MacOsBackend {
                 "grant Accessibility access to Scriptaro (or its launching terminal) in System Settings > Privacy & Security > Accessibility, then restart it".into()));
         }
         Ok(())
+    }
+
+    fn ensure_accessibility(&self) -> BackendResult<()> {
+        if !ffi::accessibility_trusted() {
+            return Err(BackendError::PermissionDenied(
+                "grant Accessibility access to Scriptaro for window discovery and focus checks"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn window_match(&self, selector: &WindowSelector) -> BackendResult<Option<(u32, Element)>> {
+        self.ensure_accessibility()?;
+        let app = match self.resolve_running(&selector.app) {
+            Ok(app) => app,
+            Err(BackendError::AppNotFound(_)) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let pid = app.processIdentifier() as u32;
+        let windows = Element::application(pid)?.windows()?;
+        let mut matched = windows
+            .into_iter()
+            .filter(|(_, title)| title == &selector.title);
+        let first = matched.next();
+        if matched.next().is_some() {
+            return Err(BackendError::AmbiguousWindow);
+        }
+        Ok(first.map(|(window, _)| (pid, window)))
+    }
+
+    fn retain_window(&mut self, pid: u32, element: Element) -> WindowTarget {
+        let app = AppSelector::Pid(pid);
+        if let Some((target, _)) = self
+            .windows
+            .iter()
+            .find(|(target, known)| target.app == app && known == &element)
+        {
+            return target.clone();
+        }
+        let target = WindowTarget {
+            app,
+            id: self.windows.len() as u64 + 1,
+        };
+        self.windows.push((target.clone(), element));
+        target
+    }
+
+    fn control_match(
+        &self,
+        selector: &ControlSelector,
+    ) -> BackendResult<Option<(u32, Element, Element)>> {
+        let Some((pid, window)) = self.window_match(&selector.window)? else {
+            return Ok(None);
+        };
+        Ok(window
+            .find_control(selector)?
+            .map(|control| (pid, window, control)))
+    }
+
+    fn window_focused(&mut self, pid: u32, window: &Element) -> BackendResult<bool> {
+        self.ensure_accessibility()?;
+        if !self.is_app_active(&AppSelector::Pid(pid))? {
+            return Ok(false);
+        }
+        Ok(Element::application(pid)?.focused_window()?.as_ref() == Some(window))
     }
 
     fn resolve_running(
@@ -150,6 +222,8 @@ impl DesktopBackend for MacOsBackend {
             Capability::Pointer,
             Capability::Scroll,
             Capability::FocusQuery,
+            Capability::Windows,
+            Capability::Controls,
         ]
     }
     fn permissions(&self) -> Vec<PermissionStatus> {
@@ -157,7 +231,7 @@ impl DesktopBackend for MacOsBackend {
             PermissionStatus {
                 name: "Accessibility",
                 granted: ffi::accessibility_trusted(),
-                purpose: "keyboard and pointer injection",
+                purpose: "keyboard/pointer input and Accessibility window control",
             },
             PermissionStatus {
                 name: "Post events",
@@ -172,6 +246,9 @@ impl DesktopBackend for MacOsBackend {
         ]
     }
     fn check_permissions(&self, required: &[Capability]) -> BackendResult<()> {
+        if required.contains(&Capability::Windows) || required.contains(&Capability::Controls) {
+            self.ensure_accessibility()?;
+        }
         if required.iter().any(|c| {
             matches!(
                 c,
@@ -227,20 +304,163 @@ impl DesktopBackend for MacOsBackend {
     }
     fn is_app_active(&mut self, selector: &AppSelector) -> BackendResult<bool> {
         autoreleasepool(|_| {
+            let target = match self.resolve_running(selector) {
+                Ok(app) => app,
+                Err(BackendError::AppNotFound(_)) => return Ok(false),
+                Err(error) => return Err(error),
+            };
             Ok(self
                 .workspace
                 .frontmostApplication()
-                .is_some_and(|app| match selector {
-                    AppSelector::Pid(pid) => {
-                        app.processIdentifier() > 0 && app.processIdentifier() as u32 == *pid
-                    }
-                    AppSelector::Identifier(id) => {
-                        app.bundleIdentifier().is_some_and(|s| s.to_string() == *id)
-                    }
-                    AppSelector::Name(name) => {
-                        app.localizedName().is_some_and(|s| s.to_string() == *name)
-                    }
-                }))
+                .is_some_and(|app| app.processIdentifier() == target.processIdentifier()))
+        })
+    }
+    fn list_windows(&mut self, selector: &AppSelector) -> BackendResult<Vec<WindowInfo>> {
+        autoreleasepool(|_| {
+            self.ensure_accessibility()?;
+            let app = self.resolve_running(selector)?;
+            Ok(Element::application(app.processIdentifier() as u32)?
+                .windows()?
+                .into_iter()
+                .map(|(_, title)| WindowInfo { title })
+                .collect())
+        })
+    }
+    fn activate_window(
+        &mut self,
+        selector: &WindowSelector,
+    ) -> BackendResult<Option<WindowTarget>> {
+        autoreleasepool(|_| {
+            let Some((pid, window)) = self.window_match(selector)? else {
+                return Ok(None);
+            };
+            let app = self.activate_app(&AppSelector::Pid(pid))?;
+            window.raise()?;
+            let target = if let Some((target, _)) = self
+                .windows
+                .iter()
+                .find(|(target, retained)| target.app == app && retained == &window)
+            {
+                target.clone()
+            } else {
+                let target = WindowTarget {
+                    app,
+                    id: self.windows.len() as u64 + 1,
+                };
+                self.windows.push((target.clone(), window));
+                target
+            };
+            Ok(Some(target))
+        })
+    }
+    fn is_window_active(&mut self, target: &WindowTarget) -> BackendResult<bool> {
+        let window = self
+            .windows
+            .iter()
+            .find(|(known, _)| known == target)
+            .map(|(_, window)| window.clone())
+            .ok_or_else(|| native("unknown window identity"))?;
+        let AppSelector::Pid(pid) = target.app else {
+            return Err(native("invalid native window identity"));
+        };
+        self.window_focused(pid, &window)
+    }
+    fn list_controls(&mut self, selector: &WindowSelector) -> BackendResult<Vec<ControlInfo>> {
+        let (_, window) = self
+            .window_match(selector)?
+            .ok_or_else(|| native("selected window not found"))?;
+        Ok(window
+            .controls()?
+            .into_iter()
+            .map(|(_, info)| info)
+            .collect())
+    }
+    fn focus_control(
+        &mut self,
+        selector: &ControlSelector,
+    ) -> BackendResult<Option<ControlTarget>> {
+        let Some((pid, window, element)) = self.control_match(selector)? else {
+            return Ok(None);
+        };
+        if !element.enabled()? {
+            return Ok(None);
+        }
+        if !self.window_focused(pid, &window)? {
+            return Err(native(
+                "activate the selected window before focusing a control",
+            ));
+        }
+        element.focus()?;
+        let window = self.retain_window(pid, window);
+        if let Some((target, _)) = self
+            .controls
+            .iter()
+            .find(|(target, known)| target.window == window && known == &element)
+        {
+            return Ok(Some(target.clone()));
+        }
+        let target = ControlTarget {
+            window,
+            id: self.controls.len() as u64 + 1,
+        };
+        self.controls.push((target.clone(), element));
+        Ok(Some(target))
+    }
+    fn is_control_focused(&mut self, target: &ControlTarget) -> BackendResult<bool> {
+        let element = self
+            .controls
+            .iter()
+            .find(|(known, _)| known == target)
+            .map(|(_, element)| element.clone())
+            .ok_or_else(|| native("unknown control identity"))?;
+        if !self.is_window_active(&target.window)? || !element.enabled()? {
+            return Ok(false);
+        }
+        let AppSelector::Pid(pid) = target.window.app else {
+            return Err(native("invalid control identity"));
+        };
+        Ok(Element::application(pid)?.focused_control()?.as_ref() == Some(&element))
+    }
+    fn invoke_control(&mut self, selector: &ControlSelector) -> BackendResult<bool> {
+        let Some((pid, window, element)) = self.control_match(selector)? else {
+            return Ok(false);
+        };
+        if !element.enabled()? {
+            return Ok(false);
+        }
+        if !self.window_focused(pid, &window)? {
+            return Err(native(
+                "activate the selected window before invoking a control",
+            ));
+        }
+        element.press()?;
+        Ok(true)
+    }
+    fn observe(&mut self, condition: &Condition) -> BackendResult<bool> {
+        autoreleasepool(|_| match condition {
+            Condition::ControlExists { control }
+            | Condition::ControlEnabled { control }
+            | Condition::ControlFocused { control } => {
+                let Some((pid, window, element)) = self.control_match(control)? else {
+                    return Ok(false);
+                };
+                match condition {
+                    Condition::ControlExists { .. } => Ok(true),
+                    Condition::ControlEnabled { .. } => element.enabled(),
+                    _ => Ok(self.window_focused(pid, &window)?
+                        && element.enabled()?
+                        && Element::application(pid)?.focused_control()?.as_ref()
+                            == Some(&element)),
+                }
+            }
+            Condition::AppActive { app } => self.is_app_active(app),
+            Condition::WindowExists { window } => Ok(self.window_match(window)?.is_some()),
+            Condition::WindowActive { window } => {
+                let Some((pid, target)) = self.window_match(window)? else {
+                    return Ok(false);
+                };
+                self.window_focused(pid, &target)
+            }
         })
     }
     fn open_file(

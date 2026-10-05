@@ -3,7 +3,10 @@
 
 pub mod recording;
 
-use scriptaro_core::{Action, AppSelector, Key, Modifier, MouseButton};
+use scriptaro_core::{
+    Action, AppSelector, Condition, ControlRole, ControlSelector, Key, Modifier, MouseButton,
+    WindowSelector,
+};
 use std::{future::Future, path::Path, pin::Pin};
 use thiserror::Error;
 
@@ -15,6 +18,8 @@ pub enum Capability {
     Pointer,
     Scroll,
     FocusQuery,
+    Windows,
+    Controls,
 }
 
 #[derive(Debug, Error)]
@@ -30,6 +35,12 @@ pub enum BackendError {
     AppNotFound(AppSelector),
     #[error("application selector is ambiguous: {0:?}; use an identifier or PID")]
     AmbiguousApp(AppSelector),
+    #[error("multiple windows match the requested title; use a unique window title")]
+    AmbiguousWindow,
+    #[error("multiple controls match; use a unique identifier or label")]
+    AmbiguousControl,
+    #[error("a candidate control does not expose a readable label; select it by identifier")]
+    ControlLabelUnavailable,
     #[error("native operation failed: {0}")]
     Native(String),
 }
@@ -50,6 +61,58 @@ pub struct ApplicationInfo {
     pub name: String,
     pub identifier: Option<String>,
     pub pid: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowInfo {
+    pub title: String,
+}
+
+/// An opaque identity owned by the backend that issued it. Never serialize this
+/// into scripts or reuse it with another backend. It survives window title changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowTarget {
+    pub app: AppSelector,
+    pub id: u64,
+}
+
+/// Discovery exposes selector metadata only, never field contents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlInfo {
+    pub role: ControlRole,
+    pub identifier: Option<String>,
+    pub label: Option<String>,
+    /// False means label retrieval failed, not that the control has no label.
+    /// Such a candidate cannot safely be excluded from a label-based search.
+    pub label_available: bool,
+}
+
+impl ControlInfo {
+    /// Match metadata after the backend has established the containing window.
+    /// Unknown labels never masquerade as an absent/nonmatching label.
+    pub fn matches_metadata(&self, selector: &ControlSelector) -> BackendResult<bool> {
+        if self.role != selector.role
+            || selector
+                .identifier
+                .as_ref()
+                .is_some_and(|id| self.identifier.as_ref() != Some(id))
+        {
+            return Ok(false);
+        }
+        if let Some(label) = &selector.label {
+            if !self.label_available {
+                return Err(BackendError::ControlLabelUnavailable);
+            }
+            return Ok(self.label.as_ref() == Some(label));
+        }
+        Ok(true)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlTarget {
+    pub window: WindowTarget,
+    pub id: u64,
 }
 
 /// Object-safe and deliberately not Send: GUI/native APIs may require an owning thread.
@@ -85,6 +148,45 @@ pub trait DesktopBackend {
     }
     fn is_app_active(&mut self, _app: &AppSelector) -> BackendResult<bool> {
         Err(self.unsupported(Capability::FocusQuery))
+    }
+    fn list_windows(&mut self, _app: &AppSelector) -> BackendResult<Vec<WindowInfo>> {
+        Err(self.unsupported(Capability::Windows))
+    }
+    /// Resolve uniquely and request activation once. None means the app/window
+    /// does not exist yet. A successful request must return a stable identity.
+    fn activate_window(&mut self, _window: &WindowSelector) -> BackendResult<Option<WindowTarget>> {
+        Err(self.unsupported(Capability::Windows))
+    }
+    fn is_window_active(&mut self, _window: &WindowTarget) -> BackendResult<bool> {
+        Err(self.unsupported(Capability::Windows))
+    }
+    fn list_controls(&mut self, _window: &WindowSelector) -> BackendResult<Vec<ControlInfo>> {
+        Err(self.unsupported(Capability::Controls))
+    }
+    /// None means missing or disabled. Requires the selected window to be active.
+    /// On Some, focus was requested once; callers must subsequently observe only.
+    fn focus_control(
+        &mut self,
+        _control: &ControlSelector,
+    ) -> BackendResult<Option<ControlTarget>> {
+        Err(self.unsupported(Capability::Controls))
+    }
+    /// Checks retained identity, containing window, focus and enabled state.
+    fn is_control_focused(&mut self, _target: &ControlTarget) -> BackendResult<bool> {
+        Err(self.unsupported(Capability::Controls))
+    }
+    /// Invoke a unique, enabled button/check box once in the active window.
+    /// False means missing or disabled and guarantees no invocation was attempted.
+    fn invoke_control(&mut self, _control: &ControlSelector) -> BackendResult<bool> {
+        Err(self.unsupported(Capability::Controls))
+    }
+    /// Missing targets are false. Permission, ambiguity and native errors must
+    /// remain errors. Observation must never send input or activate a target.
+    fn observe(&mut self, condition: &Condition) -> BackendResult<bool> {
+        match condition {
+            Condition::AppActive { app } => self.is_app_active(app),
+            _ => Err(self.unsupported(Capability::Windows)),
+        }
     }
     /// Absolute file path, optional target app. Resolves to the app which opened it.
     fn open_file(
@@ -122,7 +224,33 @@ pub fn required_capabilities(actions: &[Action]) -> Vec<Capability> {
     let mut required = Vec::new();
     for action in actions {
         let capabilities: &[Capability] = match action {
+            Action::FocusControl { .. }
+            | Action::InvokeControl { .. }
+            | Action::WaitUntil {
+                condition:
+                    Condition::ControlExists { .. }
+                    | Condition::ControlEnabled { .. }
+                    | Condition::ControlFocused { .. },
+                ..
+            } => &[
+                Capability::Controls,
+                Capability::Windows,
+                Capability::FocusQuery,
+            ],
             Action::Wait { .. } => &[],
+            Action::WaitUntil {
+                condition: Condition::AppActive { .. },
+                ..
+            } => &[Capability::FocusQuery],
+            Action::WaitUntil {
+                condition: Condition::WindowExists { .. },
+                ..
+            } => &[Capability::Windows],
+            Action::WaitUntil {
+                condition: Condition::WindowActive { .. },
+                ..
+            }
+            | Action::ActivateWindow { .. } => &[Capability::Windows, Capability::FocusQuery],
             Action::ActivateApp { .. } => &[Capability::Applications, Capability::FocusQuery],
             Action::OpenFile { .. } => &[Capability::OpenFile, Capability::FocusQuery],
             Action::TypeText { .. } | Action::KeyPress { .. } => &[Capability::Keyboard],

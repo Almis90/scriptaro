@@ -1,0 +1,33 @@
+# Replace these exact selectors with metadata returned by `scriptaro controls`.
+# Requires a running application and an existing window with an editable field.
+version: 1
+name: A document take
+sections:
+  - name: Write notes
+    setup:
+      - action: activate_window
+        window: &window
+          app: { by: identifier, value: com.example.Notes }
+          title: Meeting notes
+      - action: focus_control
+        control: &editor
+          window: *window
+          role: text_area
+          identifier: notes-editor
+    requires:
+      - kind: control_focused
+        control: *editor
+    # Retake intentionally replaces all text in this explicitly selected field.
+    reset:
+      - action: activate_window
+        window: *window
+      - action: focus_control
+        control: *editor
+      - action: key_press
+        key: a
+        modifiers: [primary]
+      - action: key_press
+        key: backspace
+    steps:
+      - action: type_text
+        text: "Meeting notes\nPrepare, rehearse, record."

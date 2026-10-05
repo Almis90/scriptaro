@@ -39,5 +39,6 @@ permissions. Use the [CLI](/guide/getting-started) when you are ready for live i
 ::: info Development milestone
 Scriptaro currently provides a CLI and reusable Rust crates. Live desktop control
 is implemented on macOS. Windows and Linux support validation and simulation;
-their native backends and a desktop GUI are future work.
+their native backends and native views are future work. A macOS desktop interface
+now shares the same engine as the CLI; see [desktop usage](/guide/desktop).
 :::
