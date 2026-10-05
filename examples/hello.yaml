@@ -1,0 +1,14 @@
+# Open a blank document in any text editor and focus it during the countdown.
+# This example deliberately has no application-specific actions.
+version: 1
+name: Hello from Scriptaro
+defaults:
+  character_delay_ms: 60
+steps:
+  - action: type_text
+    text: |-
+      Hello from Scriptaro!
+      Desktop automation for any workflow.
+      Unicode works too: café, Καλημέρα, 🦀
+  - action: wait
+    duration_ms: 500

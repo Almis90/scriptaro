@@ -1,0 +1,223 @@
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Script {
+    pub version: u32,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub defaults: Defaults,
+    pub steps: Vec<Action>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Defaults {
+    /// Delay between Unicode scalar values; there is no trailing delay.
+    pub character_delay_ms: u64,
+    /// Default timeout for app activation and native open requests.
+    pub timeout_ms: u64,
+}
+
+impl Default for Defaults {
+    fn default() -> Self {
+        Self {
+            character_delay_ms: 40,
+            timeout_ms: 5_000,
+        }
+    }
+}
+
+/// Identifiers are interpreted by the backend (e.g. a macOS bundle identifier).
+/// Scripts can also use an exact display name or process ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "by",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum AppSelector {
+    Identifier(String),
+    Name(String),
+    Pid(u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Action {
+    Wait {
+        duration_ms: u64,
+    },
+    ActivateApp {
+        app: AppSelector,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+    OpenFile {
+        path: PathBuf,
+        #[serde(default)]
+        app: Option<AppSelector>,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+    TypeText {
+        text: String,
+        #[serde(default)]
+        interval_ms: Option<u64>,
+    },
+    KeyPress {
+        key: Key,
+        #[serde(default)]
+        modifiers: Vec<Modifier>,
+    },
+    MouseMove {
+        x: f64,
+        y: f64,
+    },
+    MouseClick {
+        #[serde(default)]
+        button: MouseButton,
+        #[serde(default = "one")]
+        count: u8,
+    },
+    /// Line units. Positive vertical scrolls up; positive horizontal scrolls left.
+    Scroll {
+        #[serde(default)]
+        horizontal: i32,
+        #[serde(default)]
+        vertical: i32,
+    },
+}
+
+fn one() -> u8 {
+    1
+}
+
+impl Action {
+    /// Stable name for logs and events; deliberately excludes user content.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Wait { .. } => "wait",
+            Self::ActivateApp { .. } => "activate_app",
+            Self::OpenFile { .. } => "open_file",
+            Self::TypeText { .. } => "type_text",
+            Self::KeyPress { .. } => "key_press",
+            Self::MouseMove { .. } => "mouse_move",
+            Self::MouseClick { .. } => "mouse_click",
+            Self::Scroll { .. } => "scroll",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Modifier {
+    /// Command on macOS, Control on Windows/Linux.
+    Primary,
+    Control,
+    Alt,
+    Shift,
+    /// Command on macOS, Windows/Super on Windows/Linux.
+    Super,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseButton {
+    #[default]
+    Left,
+    Right,
+    Middle,
+}
+
+/// Physical keys named for US keyboard positions. For text, use TypeText.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Key {
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+    #[serde(rename = "0")]
+    Digit0,
+    #[serde(rename = "1")]
+    Digit1,
+    #[serde(rename = "2")]
+    Digit2,
+    #[serde(rename = "3")]
+    Digit3,
+    #[serde(rename = "4")]
+    Digit4,
+    #[serde(rename = "5")]
+    Digit5,
+    #[serde(rename = "6")]
+    Digit6,
+    #[serde(rename = "7")]
+    Digit7,
+    #[serde(rename = "8")]
+    Digit8,
+    #[serde(rename = "9")]
+    Digit9,
+    Enter,
+    Tab,
+    Space,
+    Backspace,
+    Delete,
+    Escape,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Minus,
+    Equal,
+    LeftBracket,
+    RightBracket,
+    Backslash,
+    Semicolon,
+    Quote,
+    Comma,
+    Period,
+    Slash,
+    Backtick,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+}

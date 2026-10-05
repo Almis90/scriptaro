@@ -1,0 +1,16 @@
+# Coordinates are logical desktop points. Adapt them to your display layout.
+# Start with a dry run; live playback clicks the specified location.
+version: 1
+name: Pointer primitives
+steps:
+  - action: mouse_move
+    x: 400
+    y: 300
+  - action: mouse_click
+    button: left
+    count: 2
+  - action: wait
+    duration_ms: 300
+  - action: scroll
+    vertical: -3
+    horizontal: 0

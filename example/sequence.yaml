@@ -1,0 +1,16 @@
+version: 1
+name: A reusable desktop sequence
+defaults:
+  character_delay_ms: 45
+steps:
+  - action: activate_app
+    app: { by: name, value: Demo Notes }
+  - action: type_text
+    text: |-
+      A small idea, written one character at a time.
+      Scriptaro keeps the timing in the script.
+  - action: wait
+    duration_ms: 1000
+  - action: key_press
+    key: s
+    modifiers: [primary]

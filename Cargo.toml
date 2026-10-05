@@ -1,0 +1,33 @@
+[workspace]
+members = ["crates/*", "example"]
+default-members = ["crates/scriptaro-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/Almis90/scriptaro"
+publish = false
+
+[workspace.dependencies]
+scriptaro-core = { path = "crates/scriptaro-core" }
+scriptaro-platform = { path = "crates/scriptaro-platform" }
+scriptaro-engine = { path = "crates/scriptaro-engine" }
+scriptaro-platform-macos = { path = "crates/scriptaro-platform-macos" }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9.34"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "signal"] }
+tracing = "0.1"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"

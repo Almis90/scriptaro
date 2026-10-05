@@ -1,0 +1,387 @@
+//! Sequential playback with interruptible timing and observable progress.
+#![forbid(unsafe_code)]
+mod control;
+pub use control::{ControlState, PlaybackController};
+
+use scriptaro_core::{Action, AppSelector, Script, ValidationError};
+use scriptaro_platform::{BackendError, DesktopBackend, PendingOpen, required_capabilities};
+use std::{path::PathBuf, time::Duration};
+use thiserror::Error;
+use tokio::{
+    sync::{broadcast, watch},
+    time::Instant,
+};
+
+const TICK: Duration = Duration::from_millis(20);
+
+#[derive(Debug, Clone)]
+pub struct RunOptions {
+    /// Relative script paths resolve against this directory, never the process CWD.
+    pub base_dir: PathBuf,
+    /// Scales typing intervals and explicit waits, not native readiness timeouts.
+    pub speed: f64,
+    /// Only permitted for a simulated backend.
+    pub skip_delays: bool,
+    pub initial_delay: Duration,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            base_dir: PathBuf::from("."),
+            speed: 1.0,
+            skip_delays: false,
+            initial_delay: Duration::ZERO,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunStatus {
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunReport {
+    pub status: RunStatus,
+    pub completed_steps: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlaybackEvent {
+    Started { total_steps: usize },
+    StepStarted { step: usize, action: &'static str },
+    StepCompleted { step: usize },
+    StateChanged(ControlState),
+    StepFailed { step: usize, message: String },
+    Finished(RunReport),
+}
+
+#[derive(Debug, Error)]
+pub enum EngineError {
+    #[error("invalid script: {0}")]
+    Validation(#[from] ValidationError),
+    #[error("invalid run options: {0}")]
+    Options(String),
+    #[error("preflight failed: {0}")]
+    Preflight(#[source] BackendError),
+    #[error("step {step} ({action}) failed: {source}")]
+    Step {
+        step: usize,
+        action: &'static str,
+        #[source]
+        source: StepError,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum StepError {
+    #[error(transparent)]
+    Backend(#[from] BackendError),
+    #[error("timed out waiting for {0}")]
+    Timeout(&'static str),
+    #[error("focus left the intended application ({0:?}); playback stopped")]
+    FocusLost(AppSelector),
+    #[error("playback cancelled")]
+    Cancelled,
+}
+
+pub struct Engine<'a> {
+    backend: &'a mut dyn DesktopBackend,
+    options: RunOptions,
+    controller: PlaybackController,
+    commands: watch::Receiver<ControlState>,
+    events: broadcast::Sender<PlaybackEvent>,
+    observed_state: ControlState,
+    focus: Option<AppSelector>,
+}
+
+impl<'a> Engine<'a> {
+    pub fn new(backend: &'a mut dyn DesktopBackend, options: RunOptions) -> Self {
+        let (sender, commands) = watch::channel(ControlState::Running);
+        let (events, _) = broadcast::channel(256);
+        Self {
+            backend,
+            options,
+            controller: PlaybackController { sender },
+            commands,
+            events,
+            observed_state: ControlState::Running,
+            focus: None,
+        }
+    }
+
+    pub fn controller(&self) -> PlaybackController {
+        self.controller.clone()
+    }
+    /// Slow subscribers may lag; playback is never blocked by observers.
+    pub fn subscribe(&self) -> broadcast::Receiver<PlaybackEvent> {
+        self.events.subscribe()
+    }
+
+    fn emit(&self, event: PlaybackEvent) {
+        let _ = self.events.send(event);
+    }
+
+    fn preflight(&self, script: &Script) -> Result<(), EngineError> {
+        script.validate()?;
+        if !self.options.speed.is_finite() || !(0.01..=100.0).contains(&self.options.speed) {
+            return Err(EngineError::Options(
+                "speed must be finite and between 0.01 and 100".into(),
+            ));
+        }
+        if self.options.skip_delays && !self.backend.is_simulated() {
+            return Err(EngineError::Options(
+                "skip_delays requires a simulated backend".into(),
+            ));
+        }
+        let required = required_capabilities(&script.steps);
+        for capability in &required {
+            if !self.backend.capabilities().contains(capability) {
+                return Err(EngineError::Preflight(
+                    self.backend.unsupported(*capability),
+                ));
+            }
+        }
+        self.backend
+            .check_permissions(&required)
+            .map_err(EngineError::Preflight)?;
+        // Catch missing files before activating any apps. Simulation allows draft paths.
+        if !self.backend.is_simulated() {
+            for step in &script.steps {
+                if let Action::OpenFile { path, .. } = step {
+                    let path = self.options.base_dir.join(path);
+                    if !path.is_file() {
+                        return Err(EngineError::Preflight(BackendError::Native(format!(
+                            "file does not exist or is not a regular file: {}",
+                            path.display()
+                        ))));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A run consumes its engine. Create a new engine/controller to replay a script.
+    pub async fn run(mut self, script: &Script) -> Result<RunReport, EngineError> {
+        self.preflight(script)?;
+        if !self.options.base_dir.is_absolute() {
+            self.options.base_dir = std::env::current_dir()
+                .map_err(|error| {
+                    EngineError::Options(format!("cannot resolve base directory: {error}"))
+                })?
+                .join(&self.options.base_dir);
+        }
+        self.emit(PlaybackEvent::Started {
+            total_steps: script.steps.len(),
+        });
+        let mut completed_steps = 0;
+        for (index, action) in script.steps.iter().enumerate() {
+            let step = index + 1;
+            let result = async {
+                if index == 0 {
+                    self.delay(self.options.initial_delay).await?;
+                }
+                self.checkpoint().await?;
+                self.emit(PlaybackEvent::StepStarted {
+                    step,
+                    action: action.kind(),
+                });
+                tracing::info!(step, action = action.kind(), "playing step");
+                self.execute(action, script).await
+            }
+            .await;
+            match result {
+                Ok(()) => {
+                    completed_steps += 1;
+                    self.emit(PlaybackEvent::StepCompleted { step });
+                }
+                Err(StepError::Cancelled) => {
+                    let report = RunReport {
+                        status: RunStatus::Cancelled,
+                        completed_steps,
+                    };
+                    self.emit(PlaybackEvent::Finished(report.clone()));
+                    return Ok(report);
+                }
+                Err(source) => {
+                    self.emit(PlaybackEvent::StepFailed {
+                        step,
+                        message: source.to_string(),
+                    });
+                    self.emit(PlaybackEvent::Finished(RunReport {
+                        status: RunStatus::Failed,
+                        completed_steps,
+                    }));
+                    return Err(EngineError::Step {
+                        step,
+                        action: action.kind(),
+                        source,
+                    });
+                }
+            }
+        }
+        let report = RunReport {
+            status: RunStatus::Completed,
+            completed_steps,
+        };
+        self.emit(PlaybackEvent::Finished(report.clone()));
+        Ok(report)
+    }
+
+    fn state(&mut self) -> Result<ControlState, StepError> {
+        if self.backend.service_events()? {
+            self.controller.cancel();
+        }
+        let state = *self.commands.borrow_and_update();
+        if state != self.observed_state {
+            self.observed_state = state;
+            self.emit(PlaybackEvent::StateChanged(state));
+        }
+        if state == ControlState::Cancelled {
+            return Err(StepError::Cancelled);
+        }
+        Ok(state)
+    }
+
+    async fn checkpoint(&mut self) -> Result<(), StepError> {
+        // Cooperative yield even for zero-delay scripts, so control/signal tasks run.
+        tokio::task::yield_now().await;
+        while self.state()? == ControlState::Paused {
+            tokio::select! {
+                _ = self.commands.changed() => {},
+                _ = tokio::time::sleep(TICK) => {},
+            }
+        }
+        Ok(())
+    }
+
+    /// Count only running time; a pause preserves the unelapsed portion of a wait.
+    async fn delay(&mut self, mut remaining: Duration) -> Result<(), StepError> {
+        self.checkpoint().await?;
+        if self.options.skip_delays {
+            return Ok(());
+        }
+        while !remaining.is_zero() {
+            let started = Instant::now();
+            tokio::select! {
+                biased;
+                _ = self.commands.changed() => {},
+                _ = tokio::time::sleep(remaining.min(TICK)) => {},
+            }
+            remaining = remaining.saturating_sub(started.elapsed());
+            self.checkpoint().await?;
+        }
+        Ok(())
+    }
+
+    fn scaled(&self, ms: u64) -> Duration {
+        Duration::from_secs_f64(ms as f64 / 1000.0 / self.options.speed)
+    }
+
+    async fn ready(&mut self, target: &AppSelector, deadline: Instant) -> Result<(), StepError> {
+        loop {
+            self.checkpoint().await?;
+            // Readiness deadlines use wall time, including pauses.
+            if Instant::now() >= deadline {
+                return Err(StepError::Timeout("application focus"));
+            }
+            if self.backend.is_app_active(target)? {
+                return Ok(());
+            }
+            tokio::select! {
+                _ = self.commands.changed() => {},
+                _ = tokio::time::sleep_until(deadline.min(Instant::now() + TICK)) => {},
+            }
+        }
+    }
+
+    async fn await_open(
+        &mut self,
+        mut pending: PendingOpen,
+        deadline: Instant,
+    ) -> Result<AppSelector, StepError> {
+        loop {
+            self.checkpoint().await?;
+            if Instant::now() >= deadline {
+                return Err(StepError::Timeout("file open"));
+            }
+            tokio::select! {
+                biased;
+                _ = self.commands.changed() => {},
+                result = &mut pending => return Ok(result?),
+                _ = tokio::time::sleep_until(deadline.min(Instant::now() + TICK)) => {},
+            }
+        }
+    }
+
+    async fn before_input(&mut self) -> Result<(), StepError> {
+        self.checkpoint().await?;
+        if let Some(app) = &self.focus {
+            if !self.backend.is_app_active(app)? {
+                return Err(StepError::FocusLost(app.clone()));
+            }
+        }
+        Ok(())
+    }
+
+    async fn execute(&mut self, action: &Action, script: &Script) -> Result<(), StepError> {
+        match action {
+            Action::Wait { duration_ms } => self.delay(self.scaled(*duration_ms)).await?,
+            Action::ActivateApp { app, timeout_ms } => {
+                let deadline = Instant::now()
+                    + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
+                let target = self.backend.activate_app(app)?;
+                self.ready(&target, deadline).await?;
+                self.focus = Some(target);
+            }
+            Action::OpenFile {
+                path,
+                app,
+                timeout_ms,
+            } => {
+                let deadline = Instant::now()
+                    + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
+                let path = self.options.base_dir.join(path);
+                let pending = self.backend.open_file(&path, app.as_ref())?;
+                let target = self.await_open(pending, deadline).await?;
+                self.ready(&target, deadline).await?;
+                self.focus = Some(target);
+            }
+            Action::TypeText { text, interval_ms } => {
+                let interval =
+                    self.scaled(interval_ms.unwrap_or(script.defaults.character_delay_ms));
+                for (index, character) in text.chars().enumerate() {
+                    if index > 0 {
+                        self.delay(interval).await?;
+                    }
+                    self.before_input().await?;
+                    self.backend.type_character(character)?;
+                }
+            }
+            Action::KeyPress { key, modifiers } => {
+                self.before_input().await?;
+                self.backend.press_key(*key, modifiers)?;
+            }
+            Action::MouseMove { x, y } => {
+                self.before_input().await?;
+                self.backend.move_pointer(*x, *y)?;
+            }
+            Action::MouseClick { button, count } => {
+                self.before_input().await?;
+                self.backend.click(*button, *count)?;
+            }
+            Action::Scroll {
+                horizontal,
+                vertical,
+            } => {
+                self.before_input().await?;
+                self.backend.scroll(*horizontal, *vertical)?;
+            }
+        }
+        Ok(())
+    }
+}

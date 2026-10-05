@@ -1,0 +1,55 @@
+# A macOS tutorial recipe, built entirely from generic desktop primitives.
+# Open VS Code in a disposable project and open Chrome before running.
+# Change the file path below. It is relative to this YAML file.
+# Disable editor auto-indent, auto-close brackets/quotes and format-on-type
+# to reproduce prepared code exactly. The terminal shortcut assumes defaults.
+version: 1
+name: Editor to browser tutorial
+defaults:
+  character_delay_ms: 45
+  timeout_ms: 10000
+steps:
+  - action: activate_app
+    app: { by: identifier, value: com.microsoft.VSCode }
+  - action: open_file
+    path: ./demo-project/src/main.js
+    app: { by: identifier, value: com.microsoft.VSCode }
+  - action: wait
+    duration_ms: 800
+  - action: type_text
+    text: |
+      const greeting = "Hello from Scriptaro";
+      document.querySelector("#app").textContent = greeting;
+  - action: key_press
+    key: s
+    modifiers: [primary]
+  - action: wait
+    duration_ms: 750
+  - action: key_press
+    key: backtick
+    modifiers: [control]
+  - action: wait
+    duration_ms: 500
+  - action: type_text
+    text: npm run dev
+  - action: key_press
+    key: enter
+  - action: wait
+    duration_ms: 5000
+  - action: activate_app
+    app: { by: identifier, value: com.google.Chrome }
+  - action: key_press
+    key: r
+    modifiers: [primary]
+  - action: wait
+    duration_ms: 2500
+  - action: activate_app
+    app: { by: identifier, value: com.microsoft.VSCode }
+  - action: key_press
+    key: backtick
+    modifiers: [control]
+  - action: wait
+    duration_ms: 500
+  - action: type_text
+    text: |
+      console.log("The demonstration continues.");

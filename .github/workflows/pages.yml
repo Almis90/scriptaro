@@ -1,0 +1,59 @@
+name: Deploy documentation (manual only)
+
+# Deliberately no push, tag, schedule, or workflow_run trigger.
+# Pages stays unconfigured until documentation hosting is explicitly requested.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the documentation to GitHub Pages
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      pages: read
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/configure-pages@v5
+      - run: npm ci
+      - run: npm run docs:build
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    if: ${{ inputs.publish && github.ref == 'refs/heads/main' }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

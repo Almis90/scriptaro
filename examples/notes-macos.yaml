@@ -1,0 +1,22 @@
+# Prepare a blank TextEdit document. Select plain text mode before playback.
+version: 1
+name: Meeting notes demonstration
+defaults:
+  character_delay_ms: 65
+steps:
+  - action: activate_app
+    app: { by: identifier, value: com.apple.TextEdit }
+  - action: type_text
+    text: |
+      Project planning
+
+      Goals
+      - Gather ideas from the team
+      - Agree on the next milestone
+  - action: wait
+    duration_ms: 1200
+  - action: type_text
+    interval_ms: 90
+    text: |
+
+      Next meeting: Thursday

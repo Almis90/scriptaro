@@ -1,0 +1,27 @@
+[package]
+name = "scriptaro-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "scriptaro"
+path = "src/main.rs"
+
+[dependencies]
+scriptaro-core.workspace = true
+scriptaro-platform.workspace = true
+scriptaro-engine.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+clap = { version = "4", features = ["derive"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+scriptaro-platform-macos.workspace = true
+
+[lints]
+workspace = true
