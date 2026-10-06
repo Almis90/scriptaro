@@ -125,6 +125,10 @@ automatic permission prompt or AppleScript dependency.
 [`screenshot`](docs/guide/layout-and-capture.md) additionally requires macOS 15.2+
 and **Screen Recording** access. Scripts without screenshots do not need it.
 
+[`paste_text`](docs/guide/paste-text.md) sends a prepared block through the native
+clipboard and paste shortcut. It replaces previous clipboard contents and leaves
+the prepared text there; dry runs never access the clipboard.
+
 - **Ctrl+C** cancels while the launching terminal is focused.
 - With **Input Monitoring** granted, hold **Control + Option + Escape** to cancel
   globally. The backend polls physical key state every 20 ms during waits and

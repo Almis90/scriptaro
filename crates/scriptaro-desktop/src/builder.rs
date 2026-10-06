@@ -191,6 +191,9 @@ impl Builder {
 /// Human-readable list labels deliberately omit prepared text and field values.
 pub fn summary(action: &Action) -> String {
     match action {
+        Action::PasteText { text, .. } => {
+            format!("Paste text ({} characters)", text.chars().count())
+        }
         Action::SetWindowBounds { .. } => "Set window bounds".into(),
         Action::Screenshot { .. } => "Save screenshot".into(),
         Action::LaunchApp { .. } => "Launch application".into(),

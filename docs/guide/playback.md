@@ -27,6 +27,10 @@ timeouts and the initial countdown do not scale. Pause preserves the remaining
 typing/wait delay. Native readiness timeouts use wall time, including pauses;
 an expired timeout is reported when playback resumes.
 
+[`paste_text`](/guide/paste-text) uses a separate `settle_ms` delay (200 ms by
+default). Playback speed does not scale it; pauses preserve its remaining time.
+It gives the app time to consume the clipboard but is not a delivery acknowledgement.
+
 ## Pause, resume, cancel
 
 The CLI prints its process ID. On Unix, another terminal can send:

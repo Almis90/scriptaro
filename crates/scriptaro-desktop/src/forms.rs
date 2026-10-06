@@ -82,7 +82,8 @@ pub struct Form {
 impl Kind {
     pub fn of(action: &Action) -> Self {
         match action {
-            Action::SetWindowBounds { .. }
+            Action::PasteText { .. }
+            | Action::SetWindowBounds { .. }
             | Action::Screenshot { .. }
             | Action::LaunchApp { .. }
             | Action::WaitUntil {
@@ -275,7 +276,8 @@ impl Form {
             fields: vec![],
         };
         match action {
-            Action::SetWindowBounds { .. }
+            Action::PasteText { .. }
+            | Action::SetWindowBounds { .. }
             | Action::Screenshot { .. }
             | Action::LaunchApp { .. }
             | Action::AssertControl { .. }

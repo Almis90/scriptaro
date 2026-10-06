@@ -1,0 +1,29 @@
+version: 2
+name: Paste prepared text and verify the field
+variables:
+  app: 'REPLACE_WITH_APP_IDENTIFIER'
+  window: 'REPLACE_WITH_EXACT_WINDOW_TITLE'
+  field: 'REPLACE_WITH_FIELD_IDENTIFIER'
+  message: 'Hello from Scriptaro 🦀'
+steps:
+  - action: activate_window
+    window: &window
+      app: {by: identifier, value: '${app}'}
+      title: '${window}'
+  - action: focus_control
+    control: &field
+      window: *window
+      role: text_field
+      identifier: '${field}'
+  - action: key_press
+    key: a
+    modifiers: [primary]
+  - action: paste_text
+    text: '${message}'
+    settle_ms: 200
+  - action: wait_until
+    condition:
+      kind: control_matches
+      control: *field
+      expect: {property: text, equals: '${message}'}
+    timeout_ms: 5000

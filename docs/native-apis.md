@@ -86,3 +86,12 @@ regions. The callback encodes PNG in memory through
 only owned bytes cross the callback boundary. Preflight checks Screen Recording
 permission without prompting. A synthetic-image test covers PNG encoding without
 capturing the desktop; live capture compatibility has not been verified here.
+
+Plain-text paste uses typed
+[NSPasteboard](https://developer.apple.com/documentation/appkit/nspasteboard)
+bindings: `declareTypes:owner:`, `setString:forType:` with `NSPasteboardTypeString`, and
+`changeCount` ownership checks before dispatch. CoreGraphics posts a preallocated
+Command–V down/up pair once. No prior clipboard contents are read or restored;
+the receiver can consume paste asynchronously. The SDK signatures and binding
+availability were checked; this milestone adds fault-injection coverage without
+changing the system clipboard or posting live input during verification.

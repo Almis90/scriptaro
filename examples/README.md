@@ -42,3 +42,6 @@ Simulations assume assertions pass; they cannot verify application state.
   PNG checkpoint. Replace selectors and use a new output filename for each take.
   Native screenshots need macOS 15.2+ and Screen Recording permission; dry runs
   save no images. See [layout and capture](../docs/guide/layout-and-capture.md).
+- `paste-text.yaml`: focus a field, select all, paste prepared text and verify the
+  value. Native playback replaces the clipboard and keeps the text there.
+  [Paste behavior](../docs/guide/paste-text.md); dry runs do not access the clipboard.

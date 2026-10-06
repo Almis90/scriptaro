@@ -15,6 +15,7 @@ use std::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
+    PreparePaste(String),
     SetWindowBounds(WindowSelector, Bounds),
     Screenshot(Option<Bounds>),
     Launch(LaunchTarget, bool),
@@ -35,6 +36,7 @@ pub enum Operation {
 
 #[derive(Default)]
 pub struct RecordingBackend {
+    pub paste_dispatches: Rc<Cell<usize>>,
     pub geometry: Option<Bounds>,
     pub operations: Vec<Operation>,
     pub pointer: Rc<Cell<Point>>,
@@ -51,6 +53,7 @@ impl DesktopBackend for RecordingBackend {
     }
     fn capabilities(&self) -> &'static [Capability] {
         &[
+            Capability::Paste,
             Capability::WindowBounds,
             Capability::Screenshot,
             Capability::Applications,
@@ -184,6 +187,17 @@ impl DesktopBackend for RecordingBackend {
     fn type_character(&mut self, character: char) -> BackendResult<()> {
         self.operations.push(Operation::Character(character));
         Ok(())
+    }
+    fn prepare_paste(&mut self, text: &str) -> BackendResult<Box<dyn crate::PreparedPaste>> {
+        self.operations.push(Operation::PreparePaste(text.into()));
+        struct Paste(Rc<Cell<usize>>);
+        impl crate::PreparedPaste for Paste {
+            fn dispatch(self: Box<Self>) -> BackendResult<()> {
+                self.0.set(self.0.get() + 1);
+                Ok(())
+            }
+        }
+        Ok(Box::new(Paste(self.paste_dispatches.clone())))
     }
     fn press_key(&mut self, key: Key, modifiers: &[Modifier]) -> BackendResult<()> {
         self.operations.push(Operation::Key(key, modifiers.into()));

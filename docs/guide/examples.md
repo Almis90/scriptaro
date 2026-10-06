@@ -108,3 +108,11 @@ See [Launching apps and waiting for values](/guide/launch-and-readiness).
 display PNG. Set the app/window variables and choose a fresh output name before
 native playback. Rehearse with `scriptaro run examples/layout-and-capture.yaml --dry-run`;
 simulation writes no images. See [Window layout and screenshots](/guide/layout-and-capture).
+
+## Paste prepared text
+
+`examples/paste-text.yaml` selects a field's contents, pastes a replacement and
+waits for its exposed value to match. Replace its app/window/control selectors
+before native playback. `scriptaro run examples/paste-text.yaml --dry-run` touches
+neither clipboard nor desktop. Native paste replaces the clipboard and leaves
+the text there. See [Paste prepared text](/guide/paste-text).

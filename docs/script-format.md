@@ -40,6 +40,7 @@ pause immediately. Pausing does not undo an OS request already sent.
 | `activate_window` | `window` | `timeout_ms` |
 | `open_file` | `path` | `app`, `timeout_ms` |
 | `type_text` | `text` | `interval_ms` |
+| `paste_text` | `text` (nonempty) | `settle_ms` (`200`) |
 | `key_press` | `key` | `modifiers` (default `[]`) |
 | `mouse_move` | finite `x`, `y` | `duration_ms` (default `0`, instant) |
 | `mouse_drag` | `from`, `to` (`x`, `y` points), `duration_ms` | `button` (`left`) |
@@ -70,6 +71,10 @@ or a specific application bundle, then wait for its readiness.
 Use [`set_window_bounds` and `screenshot`](/guide/layout-and-capture) for repeatable
 window layouts and PNG checkpoints. Native screenshots require macOS 15.2+ and
 Screen Recording permission; other actions retain their existing requirements.
+
+[`paste_text`](/guide/paste-text) replaces the clipboard and sends one paste shortcut.
+It leaves the text on the clipboard. Its settling delay is unscaled and does not
+prove delivery; use a value readiness condition when confirmation is needed.
 
 `activate_app` only activates a running app, then waits for it to become frontmost.
 Activation refusal, ambiguity, disappearance, and timeout are errors. No action

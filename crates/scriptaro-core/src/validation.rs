@@ -132,6 +132,25 @@ impl Script {
         for (index, step) in self.steps.iter().enumerate() {
             let location = format!("steps[{}] ({})", index + 1, step.kind());
             match step {
+                Action::PasteText { text, settle_ms } => {
+                    text_bytes = text_bytes.saturating_add(text.len());
+                    if text.is_empty() || text_bytes > MAX_SCRIPT_BYTES {
+                        return Err(ValidationError::at(
+                            &location,
+                            "paste text must be nonempty and combined text must not exceed 4 MiB",
+                        ));
+                    }
+                    if text
+                        .chars()
+                        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+                    {
+                        return Err(ValidationError::at(
+                            &location,
+                            "paste text permits newline, carriage return and tab, but no other control characters",
+                        ));
+                    }
+                    duration(*settle_ms, &location, false)?;
+                }
                 Action::SetWindowBounds {
                     window: selector,
                     bounds: value,

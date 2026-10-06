@@ -50,6 +50,43 @@ fn json(output: &Output, code: i32) -> Value {
 const SCRIPT: &str = "version: 1\ndefaults: {character_delay_ms: 17, timeout_ms: 3456}\nsteps:\n  - action: type_text\n    text: 'PRIVATE 🦀 text'\n  - action: wait\n    duration_ms: 2\n";
 
 #[test]
+fn paste_plans_and_reports_redact_contents_and_disclose_clipboard_policy() {
+    let root = Scratch::new();
+    let path = root.script("version: 2\nvariables: {message: 'PRIVATE 🦀'}\nsteps:\n - action: paste_text\n   text: '${message}'\n");
+    let output = cli().arg("plan").arg(&path).arg("--json").output().unwrap();
+    let plan = json(&output, 0);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+    assert_eq!(plan["data"]["steps"][0]["characters"], 9);
+    assert_eq!(plan["data"]["steps"][0]["settle_ms"], 200);
+    assert_eq!(plan["data"]["steps"][0]["clipboard"], "replace_and_keep");
+    assert_eq!(
+        plan["data"]["required_capabilities"],
+        serde_json::json!(["paste", "keyboard"])
+    );
+    let output = cli().arg("plan").arg(&path).output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(!text.contains("PRIVATE"));
+    assert!(text.contains("clipboard replaced and retained"));
+    let report = root.0.join("report.json");
+    let output = cli()
+        .arg("run")
+        .arg(&path)
+        .args(["--dry-run", "--json", "--report"])
+        .arg(&report)
+        .output()
+        .unwrap();
+    let result = json(&output, 0);
+    assert_eq!(result["data"]["completed_steps"], 1);
+    assert_eq!(result["data"]["mode"], "simulation");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(report).unwrap()).unwrap(),
+        result
+    );
+}
+
+#[test]
 fn geometry_and_screenshot_plans_are_explicit_and_dry_runs_create_no_image() {
     let root = Scratch::new();
     let source = "version: 2\nvariables: {output: 'shot.png'}\nsteps:\n - action: set_window_bounds\n   window: {app: {by: name, value: Demo}, title: Scratch}\n   bounds: {x: -30, y: 20, width: 800, height: 600}\n - action: screenshot\n   path: '${output}'\n";

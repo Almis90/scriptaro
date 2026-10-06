@@ -198,6 +198,12 @@ pub struct Bounds {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    PasteText {
+        text: String,
+        /// Running-time delay after dispatch; not an acknowledgement of delivery.
+        #[serde(default = "paste_settle_ms")]
+        settle_ms: u64,
+    },
     SetWindowBounds {
         window: WindowSelector,
         bounds: Bounds,
@@ -300,6 +306,10 @@ fn yes() -> bool {
     true
 }
 
+fn paste_settle_ms() -> u64 {
+    200
+}
+
 fn one() -> u8 {
     1
 }
@@ -308,6 +318,7 @@ impl Action {
     /// Stable name for logs and events; deliberately excludes user content.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::PasteText { .. } => "paste_text",
             Self::SetWindowBounds { .. } => "set_window_bounds",
             Self::Screenshot { .. } => "screenshot",
             Self::LaunchApp { .. } => "launch_app",

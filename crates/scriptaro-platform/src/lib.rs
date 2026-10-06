@@ -12,6 +12,7 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
+    Paste,
     WindowBounds,
     Screenshot,
     Applications,
@@ -59,6 +60,14 @@ pub type PendingLaunch = PendingOpen;
 /// Capture resolves to PNG bytes in memory. Backends must never write output paths.
 /// Dropping this future stops waiting; a native capture may still finish in memory.
 pub type PendingScreenshot = Pin<Box<dyn Future<Output = BackendResult<Vec<u8>>>>>;
+
+/// Owns prepared clipboard identity and input resources, without borrowing the
+/// backend. Dropping before dispatch sends no input; it does not restore the
+/// clipboard. Consuming dispatch must verify clipboard ownership and emit a
+/// single complete paste shortcut, or fail without input. Never retry dispatch.
+pub trait PreparedPaste {
+    fn dispatch(self: Box<Self>) -> BackendResult<()>;
+}
 
 #[derive(Debug, Clone)]
 pub struct PermissionStatus {
@@ -262,6 +271,12 @@ pub trait DesktopBackend {
     fn type_character(&mut self, _character: char) -> BackendResult<()> {
         Err(self.unsupported(Capability::Keyboard))
     }
+    /// Replace the clipboard with plain text and allocate paste input resources.
+    /// No keystrokes yet: the engine rechecks control state and focus afterward.
+    /// Failure/cancellation can leave clipboard changes; no automatic restoration.
+    fn prepare_paste(&mut self, _text: &str) -> BackendResult<Box<dyn PreparedPaste>> {
+        Err(self.unsupported(Capability::Paste))
+    }
     fn press_key(&mut self, _key: Key, _modifiers: &[Modifier]) -> BackendResult<()> {
         Err(self.unsupported(Capability::Keyboard))
     }
@@ -303,6 +318,7 @@ pub fn required_capabilities(actions: &[Action]) -> Vec<Capability> {
     let mut required = Vec::new();
     for action in actions {
         let capabilities: &[Capability] = match action {
+            Action::PasteText { .. } => &[Capability::Paste, Capability::Keyboard],
             Action::SetWindowBounds { .. } => &[Capability::Windows, Capability::WindowBounds],
             Action::Screenshot { .. } => &[Capability::Screenshot],
             Action::LaunchApp { activate: true, .. } => {

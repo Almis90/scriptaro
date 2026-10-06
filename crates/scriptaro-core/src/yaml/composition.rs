@@ -299,7 +299,9 @@ impl Compiler<'_> {
                     self.text(text, at)?;
                 }
             }
-            Action::TypeText { text, .. } => self.text(text, at)?,
+            Action::TypeText { text, .. } | Action::PasteText { text, .. } => {
+                self.text(text, at)?
+            }
             Action::OpenFile { path, app, .. } => {
                 let mut text = path.to_string_lossy().into_owned();
                 self.text(&mut text, at)?;

@@ -278,6 +278,10 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                 for (index, action) in script.steps.iter().enumerate() {
                     use scriptaro_core::Action;
                     let detail = match action {
+                        Action::PasteText { text, settle_ms } => format!(
+                            "{} characters; clipboard replaced and retained; {settle_ms} ms settling",
+                            text.chars().count()
+                        ),
                         Action::SetWindowBounds { window, bounds, .. } => {
                             format!("{window:?}; {bounds:?}")
                         }

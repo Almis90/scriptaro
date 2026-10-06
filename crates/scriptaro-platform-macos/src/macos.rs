@@ -1,4 +1,4 @@
-use crate::{accessibility::Element, capture, ffi, keyboard};
+use crate::{accessibility::Element, capture, ffi, keyboard, paste};
 use block2::RcBlock;
 use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
 use core_graphics::{
@@ -218,6 +218,7 @@ impl DesktopBackend for MacOsBackend {
     }
     fn capabilities(&self) -> &'static [Capability] {
         &[
+            Capability::Paste,
             Capability::WindowBounds,
             Capability::Screenshot,
             Capability::Applications,
@@ -273,6 +274,7 @@ impl DesktopBackend for MacOsBackend {
             matches!(
                 c,
                 Capability::Keyboard
+                    | Capability::Paste
                     | Capability::Pointer
                     | Capability::Scroll
                     | Capability::Drag
@@ -705,6 +707,13 @@ impl DesktopBackend for MacOsBackend {
                 Some(c.encode_utf8(&mut [0; 4])),
             ),
         }
+    }
+    fn prepare_paste(
+        &mut self,
+        text: &str,
+    ) -> BackendResult<Box<dyn scriptaro_platform::PreparedPaste>> {
+        self.ensure_input_access()?;
+        paste::prepare(text, self.event_source()?)
     }
     fn press_key(&mut self, key: Key, modifiers: &[Modifier]) -> BackendResult<()> {
         self.keyboard_pair(keyboard::keycode(key), keyboard::flags(modifiers), None)

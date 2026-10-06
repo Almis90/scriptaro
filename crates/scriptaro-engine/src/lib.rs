@@ -611,6 +611,15 @@ impl<'a> Engine<'a> {
 
     async fn execute(&mut self, action: &Action, script: &Script) -> Result<(), StepError> {
         match action {
+            Action::PasteText { text, settle_ms } => {
+                self.before_input().await?;
+                let prepared = self.backend.prepare_paste(text)?;
+                self.before_input().await?;
+                prepared.dispatch()?;
+                // Keep the clipboard available before subsequent steps. This is
+                // an unscaled running-time delay, never proof of consumption.
+                self.delay(Duration::from_millis(*settle_ms)).await?;
+            }
             Action::SetWindowBounds {
                 window,
                 bounds,

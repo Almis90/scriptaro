@@ -144,3 +144,15 @@ releases remain unpublished.
 - Added CLI plans, version 2 path/selector interpolation, examples and docs.
   Verification uses simulated/fault-injection tests and a synthetic image;
   no live desktop runs or guided UI changes in this milestone.
+
+### Plain-text paste — 2026-10-06
+
+- Added `paste_text` with version 2 interpolation, Unicode/CRLF/tab preservation,
+  redacted plans and an unscaled, pause-aware settling delay (default 200 ms).
+- Added a portable prepare/dispatch contract with focus checks on both sides of
+  clipboard staging and one-shot paste dispatch. macOS uses NSPasteboard and
+  CoreGraphics; detected clipboard ownership changes stop before the shortcut.
+- Clipboard replacement is explicit: previous formats are discarded, prepared
+  text remains available, and cancellation never retries input or restores data.
+- Added an example that verifies the pasted field value, docs and focused
+  fault-injection tests. No live clipboard/input test or guided UI work performed.

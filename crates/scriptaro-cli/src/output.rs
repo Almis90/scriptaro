@@ -56,6 +56,7 @@ impl Outcome {
 
 pub fn capability(capability: &Capability) -> &'static str {
     match capability {
+        Capability::Paste => "paste",
         Capability::WindowBounds => "window_bounds",
         Capability::Screenshot => "screenshot",
         Capability::Applications => "applications",
@@ -77,6 +78,7 @@ pub fn capability(capability: &Capability) -> &'static str {
 pub fn plan(script: &Script) -> Vec<Value> {
     script.steps.iter().enumerate().map(|(index, action)| {
         let mut value = match action {
+            Action::PasteText { text, settle_ms } => json!({"action":"paste_text", "characters":text.chars().count(), "settle_ms":settle_ms,"clipboard":"replace_and_keep"}),
             Action::TypeText { text, interval_ms } => json!({"action":"type_text", "characters":text.chars().count(), "interval_ms":interval_ms.unwrap_or(script.defaults.character_delay_ms)}),
             _ => serde_json::to_value(action).expect("validated actions serialize"),
         };

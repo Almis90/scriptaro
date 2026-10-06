@@ -1,5 +1,10 @@
 # CLI output and reports
 
+`paste_text` plans omit prepared text and show `characters`, `settle_ms` and
+`clipboard: replace_and_keep`. Simulation never accesses the clipboard or posts
+the paste shortcut. Native completion confirms dispatch and a settling delay,
+not delivery; [verify the value](/guide/paste-text#allow-time-then-verify) when needed.
+
 Plans for `set_window_bounds` and `screenshot` include selectors, geometry, paths
 and effective timeouts. Screenshot steps in `mode: simulation` create no PNG files;
 completed simulated steps do not prove captures exist. Reports never embed image

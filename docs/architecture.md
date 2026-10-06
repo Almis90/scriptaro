@@ -151,3 +151,9 @@ Screenshots have their own capability and return an owned PNG future. Backends
 never receive output paths. The engine stages and publishes images without
 overwriting destinations, handles cancellation, and skips filesystem access in
 simulation. Native macOS capture details remain entirely inside the backend.
+
+`paste_text` uses the `Paste` capability and an owned `PreparedPaste` token.
+Preparation replaces the clipboard without posting input. The engine rechecks
+focus/control state before consuming the token to dispatch one shortcut. Tokens
+can reject changed clipboard ownership; dropping one sends no input and does not
+restore clipboard contents. The unscaled settling delay remains engine policy.
