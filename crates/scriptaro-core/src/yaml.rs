@@ -4,8 +4,10 @@ use thiserror::Error;
 
 mod composition;
 mod input_boundaries;
+mod provenance;
 pub use composition::{CompiledScript, compile};
 pub use input_boundaries::{InputBoundaryPolicy, InputBoundarySummary};
+pub use provenance::{CallSite, PreparedScript, SourceOrigin};
 
 #[derive(Debug, Error)]
 pub enum ScriptError {

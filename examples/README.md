@@ -54,3 +54,8 @@ Simulations assume assertions pass; they cannot verify application state.
 - `input-boundaries.yaml`: strict input declarations, value postconditions before
   changing fields, an explicit unverified waiver and a technical unscaled wait.
   Replace selectors and prepare scratch fields before native playback.
+
+Keep optional execution evidence with `--journal take.jsonl`, then inspect it with
+`scriptaro journal take.jsonl`. Use a fresh filename for each take. See
+[execution journals](../docs/guide/execution-journal.md) for source references,
+partial dispatch counts and incomplete-run handling.

@@ -26,6 +26,7 @@ impl Session {
     }
     pub fn event(&mut self, event: PlaybackEvent) {
         match event {
+            PlaybackEvent::StepEvidence { .. } => {}
             PlaybackEvent::Started { total_steps } => {
                 self.total = total_steps;
                 self.completed = 0;

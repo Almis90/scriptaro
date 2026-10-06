@@ -16,6 +16,8 @@ pub struct Outcome {
     pub error: Option<Diagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report_error: Option<Diagnostic>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub journal_error: Option<Diagnostic>,
 }
 impl Outcome {
     pub fn new(command: &str, data: Value) -> Self {
@@ -27,6 +29,7 @@ impl Outcome {
             data,
             error: None,
             report_error: None,
+            journal_error: None,
         }
     }
     pub fn failed(command: &str, error: Diagnostic) -> Self {
@@ -102,6 +105,9 @@ pub fn plan(script: &Script) -> Vec<Value> {
 // Shared by the report writer and integration tests via their JSON representation.
 #[derive(Debug, Serialize)]
 pub struct RunData {
+    pub run_id: String,
+    pub journal: Option<String>,
+    pub last_action: Option<crate::journal::ActionRecord>,
     pub script: String,
     pub source_version: Option<u32>,
     pub input_boundaries: Option<scriptaro_core::yaml::InputBoundarySummary>,

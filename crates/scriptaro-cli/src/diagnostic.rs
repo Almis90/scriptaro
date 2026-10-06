@@ -17,6 +17,8 @@ pub struct Diagnostic {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Context {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<scriptaro_core::yaml::SourceOrigin>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
@@ -99,6 +101,25 @@ impl Diagnostic {
                 }
             })
             .unwrap_or_default();
+        let context = if let Some(source) = &self.context.source {
+            let calls = source
+                .call_chain
+                .iter()
+                .map(|call| format!("{} → {}", call.location, call.sequence))
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!(
+                "{context}{}{}: ",
+                source.location,
+                if calls.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (via {calls})")
+                }
+            )
+        } else {
+            context
+        };
         format!(
             "scriptaro [{}]: {context}{}\nHint: {}",
             self.code, self.message, self.hint
@@ -158,6 +179,15 @@ impl From<BackendError> for Diagnostic {
 impl From<EngineError> for Diagnostic {
     fn from(error: EngineError) -> Self {
         match error {
+            EngineError::Evidence { step, message, .. } => {
+                let mut diagnostic = Self::new(
+                    "journal_write_failed",
+                    message,
+                    "Inspect the journal and application state before a fresh take; no effects are retried.",
+                );
+                diagnostic.context.step = step;
+                diagnostic
+            }
             EngineError::Validation(error) => error.into(),
             EngineError::Options(message) => Self::new(
                 "invalid_options",
@@ -172,6 +202,11 @@ impl From<EngineError> for Diagnostic {
             } => {
                 let message = source.to_string();
                 let mut diagnostic = match source {
+                    StepError::Evidence(message) => Self::new(
+                        "journal_write_failed",
+                        message,
+                        "Inspect the journal and application state before a fresh take; no effects are retried.",
+                    ),
                     StepError::Backend(error) => Self::from(error),
                     StepError::Timeout(_) | StepError::ReadinessTimeout { .. } => Self::new(
                         "timeout",

@@ -33,6 +33,7 @@ export default defineConfig({
         { text: 'Script format', link: '/script-format' },
         { text: 'Playback and controls', link: '/guide/playback' },
         { text: 'CLI output and reports', link: '/guide/cli-output' },
+        { text: 'Execution journals', link: '/guide/execution-journal' },
         { text: 'Variables and sequences', link: '/guide/reuse' },
         { text: 'Motion and assertions', link: '/guide/motion-and-assertions' },
         { text: 'Launch and readiness', link: '/guide/launch-and-readiness' },

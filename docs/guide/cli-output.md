@@ -1,5 +1,9 @@
 # CLI output and reports
 
+Use `run --journal PATH` for synchronized action intent/outcome evidence and
+`journal PATH` to inspect interrupted runs. See [Execution journals](/guide/execution-journal)
+for source references, partial input counts, storage failures, and privacy limits.
+
 `paste_text` plans omit prepared text and show `characters`, `settle_ms` and
 `clipboard: replace_and_keep`. Simulation never accesses the clipboard or posts
 the paste shortcut. Native completion confirms dispatch and a settling delay,
@@ -35,12 +39,13 @@ The version 1 envelope has these fields:
 | Field | Meaning |
 | --- | --- |
 | `schema_version` | Output contract version, currently `1`; independent of YAML version |
-| `command` | `run`, `plan`, `validate`, `sections`, `recipes`, `init`, `doctor`, `apps`, `windows` or `controls` |
+| `command` | `run`, `plan`, `validate`, `sections`, `recipes`, `init`, `doctor`, `apps`, `windows` `controls` or `journal` |
 | `ok` | Whether the command succeeded, including report persistence when requested |
 | `exit_code` | Intended process exit code before delivery of stdout |
 | `data` | Command result; may be `null` when preparation or discovery fails |
 | `error` | Diagnostic object, or `null` |
 | `report_error` | Present only if finalizing the requested run report fails |
+| `journal_error` | Present only if creating or saving the requested journal fails |
 
 Argument parsing failures use `command: "arguments"` and diagnostic code `usage`.
 Consumers should check `schema_version`, tolerate additional fields, and branch
@@ -49,12 +54,12 @@ on codes rather than human-readable messages.
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Command completed successfully |
-| `1` | Script, platform, playback, report or output-delivery error |
+| `1` | Script, platform, playback, journal, report or output-delivery error |
 | `2` | Invalid command-line arguments |
 | `130` | Playback cancelled, including a handled termination signal |
 
 Cancellation has `ok: false`, `data.status: "cancelled"` and `error: null`.
-A report-persistence error takes precedence over cancellation's exit code.
+A journal/report-persistence error takes precedence over cancellation's exit code.
 `doctor` remains advisory: it can exit successfully while reporting missing
 permissions or `native_supported: false`. Check its data before native playback.
 
@@ -150,3 +155,8 @@ Successful plans omit prepared text, and run reports do not embed scripts or
 individual typed characters. These files are not fully redacted: paths,
 selectors and diagnostic messages may contain private information, including
 values from invalid input or native errors. Review them before sharing.
+
+Run results also include `run_id`, the optional `journal` path, and `last_action`
+with its source and effect evidence. Plan actions have the same `source` structure.
+Failures during playback carry `error.source` when an action source is available.
+These fields are additive within output schema version 1.

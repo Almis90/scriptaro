@@ -282,3 +282,7 @@ scriptaro plan take.yaml --section 'Write text' --retake
 Starters cover a basic wait, text entry, two-field forms and application switching. Replace the
 selectors and text, inspect the reset, and rehearse in simulation. Generation
 never runs a script or overwrites a file. See [Prepare a script](docs/guide/preparation.md).
+
+For interrupted takes, use `run --journal take.jsonl` and inspect with
+`scriptaro journal take.jsonl`. See [execution journals](docs/guide/execution-journal.md)
+for source references, partial dispatch evidence, and storage/privacy limits.

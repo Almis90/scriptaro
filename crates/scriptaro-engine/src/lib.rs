@@ -1,6 +1,8 @@
 //! Sequential playback with interruptible timing and observable progress.
 #![forbid(unsafe_code)]
 mod control;
+mod evidence;
+pub use evidence::{EffectEvidence, EffectOutcome};
 mod screenshot;
 mod typing;
 pub use control::{ControlState, PlaybackController};
@@ -70,16 +72,43 @@ pub struct RunReport {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlaybackEvent {
-    Started { total_steps: usize },
-    StepStarted { step: usize, action: &'static str },
-    StepCompleted { step: usize },
+    Started {
+        total_steps: usize,
+    },
+    StepStarted {
+        step: usize,
+        action: &'static str,
+    },
+    StepCompleted {
+        step: usize,
+    },
+    StepEvidence {
+        step: usize,
+        evidence: EffectEvidence,
+    },
     StateChanged(ControlState),
-    StepFailed { step: usize, message: String },
+    StepFailed {
+        step: usize,
+        message: String,
+    },
     Finished(RunReport),
+}
+
+/// A synchronous, fallible observer used for durable execution records.
+/// A failed record stops playback. Implementations must bound their storage and
+/// must not attempt to replay input. Blocking I/O adds action-boundary latency.
+pub trait EventSink {
+    fn record(&mut self, event: &PlaybackEvent) -> Result<(), String>;
 }
 
 #[derive(Debug, Error)]
 pub enum EngineError {
+    #[error("execution evidence could not be saved: {message}")]
+    Evidence {
+        completed_steps: usize,
+        step: Option<usize>,
+        message: String,
+    },
     #[error("invalid script: {0}")]
     Validation(#[from] ValidationError),
     #[error("invalid run options: {0}")]
@@ -97,6 +126,8 @@ pub enum EngineError {
 
 #[derive(Debug, Error)]
 pub enum StepError {
+    #[error("execution evidence could not be saved: {0}")]
+    Evidence(String),
     #[error(transparent)]
     Backend(#[from] BackendError),
     #[error("timed out waiting for {0}")]
@@ -122,6 +153,8 @@ pub enum StepError {
 
 pub struct Engine<'a> {
     backend: &'a mut dyn DesktopBackend,
+    sink: Option<&'a mut dyn EventSink>,
+    effects: evidence::Effects,
     options: RunOptions,
     controller: PlaybackController,
     commands: watch::Receiver<ControlState>,
@@ -138,6 +171,8 @@ impl<'a> Engine<'a> {
         let (events, _) = broadcast::channel(256);
         Self {
             backend,
+            sink: None,
+            effects: Default::default(),
             options,
             controller: PlaybackController { sender },
             commands,
@@ -157,8 +192,30 @@ impl<'a> Engine<'a> {
         self.events.subscribe()
     }
 
-    fn emit(&self, event: PlaybackEvent) {
+    pub fn with_event_sink(mut self, sink: &'a mut dyn EventSink) -> Self {
+        self.sink = Some(sink);
+        self
+    }
+
+    fn emit(&mut self, event: PlaybackEvent) -> Result<(), StepError> {
+        if let Some(sink) = self.sink.as_mut() {
+            sink.record(&event).map_err(StepError::Evidence)?;
+        }
         let _ = self.events.send(event);
+        Ok(())
+    }
+
+    fn record(
+        &mut self,
+        event: PlaybackEvent,
+        completed_steps: usize,
+        step: Option<usize>,
+    ) -> Result<(), EngineError> {
+        self.emit(event).map_err(|error| EngineError::Evidence {
+            completed_steps,
+            step,
+            message: error.to_string(),
+        })
     }
 
     fn preflight(&self, script: &Script) -> Result<(), EngineError> {
@@ -241,12 +298,18 @@ impl<'a> Engine<'a> {
                 })?
                 .join(&self.options.base_dir);
         }
-        self.emit(PlaybackEvent::Started {
-            total_steps: script.steps.len(),
-        });
+        self.record(
+            PlaybackEvent::Started {
+                total_steps: script.steps.len(),
+            },
+            0,
+            None,
+        )?;
         let mut completed_steps = 0;
         for (index, action) in script.steps.iter().enumerate() {
             let step = index + 1;
+            self.effects = Default::default();
+            let mut dispatched = false;
             let result = async {
                 if index == 0 {
                     self.delay(self.options.initial_delay).await?;
@@ -255,30 +318,56 @@ impl<'a> Engine<'a> {
                 self.emit(PlaybackEvent::StepStarted {
                     step,
                     action: action.kind(),
-                });
+                })?;
+                dispatched = true;
                 tracing::info!(step, action = action.kind(), "playing step");
                 self.execute(action, script).await
             }
             .await;
+            if dispatched {
+                let evidence =
+                    self.effects
+                        .snapshot(action, result.is_ok(), self.backend.is_simulated());
+                // Save evidence with the terminal action event. On failure preserve
+                // the primary execution error; the sink retains its own I/O error.
+                let recorded = self.record(
+                    PlaybackEvent::StepEvidence { step, evidence },
+                    completed_steps + usize::from(result.is_ok()),
+                    Some(step),
+                );
+                if result.is_ok() {
+                    recorded?;
+                }
+            }
             match result {
                 Ok(()) => {
                     completed_steps += 1;
-                    self.emit(PlaybackEvent::StepCompleted { step });
+                    self.record(
+                        PlaybackEvent::StepCompleted { step },
+                        completed_steps,
+                        Some(step),
+                    )?;
                 }
                 Err(StepError::Cancelled) => {
                     let report = RunReport {
                         status: RunStatus::Cancelled,
                         completed_steps,
                     };
-                    self.emit(PlaybackEvent::Finished(report.clone()));
+                    self.record(
+                        PlaybackEvent::Finished(report.clone()),
+                        completed_steps,
+                        dispatched.then_some(step),
+                    )?;
                     return Ok(report);
                 }
                 Err(source) => {
-                    self.emit(PlaybackEvent::StepFailed {
-                        step,
-                        message: source.to_string(),
-                    });
-                    self.emit(PlaybackEvent::Finished(RunReport {
+                    if dispatched {
+                        let _ = self.emit(PlaybackEvent::StepFailed {
+                            step,
+                            message: source.to_string(),
+                        });
+                    }
+                    let _ = self.emit(PlaybackEvent::Finished(RunReport {
                         status: RunStatus::Failed,
                         completed_steps,
                     }));
@@ -294,7 +383,11 @@ impl<'a> Engine<'a> {
             status: RunStatus::Completed,
             completed_steps,
         };
-        self.emit(PlaybackEvent::Finished(report.clone()));
+        self.record(
+            PlaybackEvent::Finished(report.clone()),
+            completed_steps,
+            None,
+        )?;
         Ok(report)
     }
 
@@ -305,7 +398,7 @@ impl<'a> Engine<'a> {
         let state = *self.commands.borrow_and_update();
         if state != self.observed_state {
             self.observed_state = state;
-            self.emit(PlaybackEvent::StateChanged(state));
+            self.emit(PlaybackEvent::StateChanged(state))?;
         }
         if state == ControlState::Cancelled {
             return Err(StepError::Cancelled);
@@ -440,7 +533,10 @@ impl<'a> Engine<'a> {
         let target = loop {
             self.checkpoint().await?;
             Self::check_deadline(deadline, "window_exists", timeout_ms)?;
-            if let Some(target) = self.backend.activate_window(window)? {
+            self.effects.begin("activate_window");
+            let target = self.backend.activate_window(window)?;
+            self.effects.finish(target.is_some());
+            if let Some(target) = target {
                 break target;
             }
             self.poll_again(deadline).await;
@@ -472,14 +568,22 @@ impl<'a> Engine<'a> {
             self.checkpoint().await?;
             Self::check_deadline(deadline, "control_enabled", timeout_ms)?;
             if invoke {
-                if self.backend.invoke_control(control)? {
+                self.effects.begin("invoke_control");
+                let invoked = self.backend.invoke_control(control)?;
+                self.effects.finish(invoked);
+                if invoked {
                     // An invocation can change focus or close its window. Preserve
                     // previous guards: subsequent input must explicitly retarget.
                     Self::check_deadline(deadline, "control_invocation", timeout_ms)?;
                     return Ok(());
                 }
-            } else if let Some(target) = self.backend.focus_control(control)? {
-                break target;
+            } else {
+                self.effects.begin("focus_control");
+                let target = self.backend.focus_control(control)?;
+                self.effects.finish(target.is_some());
+                if let Some(target) = target {
+                    break target;
+                }
             }
             self.poll_again(deadline).await;
         };
@@ -585,9 +689,13 @@ impl<'a> Engine<'a> {
                 }
             };
             if let Some(session) = drag.as_mut() {
+                self.effects.begin("drag_move");
                 session.move_to(point)?;
+                self.effects.finish(true);
             } else {
+                self.effects.begin("move_pointer");
                 self.backend.move_pointer(point.x, point.y)?;
+                self.effects.finish(true);
             }
             if elapsed == duration {
                 break;
@@ -614,9 +722,13 @@ impl<'a> Engine<'a> {
         match action {
             Action::PasteText { text, settle_ms } => {
                 self.before_input().await?;
+                self.effects.begin("prepare_clipboard");
                 let prepared = self.backend.prepare_paste(text)?;
+                self.effects.finish(true);
                 self.before_input().await?;
+                self.effects.begin("paste_dispatch");
                 prepared.dispatch()?;
+                self.effects.finish(true);
                 // Keep the clipboard available before subsequent steps. This is
                 // an unscaled running-time delay, never proof of consumption.
                 self.delay(Duration::from_millis(*settle_ms)).await?;
@@ -631,7 +743,10 @@ impl<'a> Engine<'a> {
                 let target = loop {
                     self.checkpoint().await?;
                     Self::check_deadline(deadline, "window_exists", timeout_ms)?;
-                    if let Some(target) = self.backend.set_window_bounds(window, *bounds)? {
+                    self.effects.begin("set_window_bounds");
+                    let target = self.backend.set_window_bounds(window, *bounds)?;
+                    self.effects.finish(target.is_some());
+                    if let Some(target) = target {
                         break target;
                     }
                     self.poll_again(deadline).await;
@@ -656,6 +771,7 @@ impl<'a> Engine<'a> {
             } => {
                 let deadline = Instant::now()
                     + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
+                self.effects.begin("prepare_screenshot_file");
                 let output = if self.backend.is_simulated() {
                     None
                 } else {
@@ -670,6 +786,7 @@ impl<'a> Engine<'a> {
                         )?,
                     )
                 };
+                self.effects.finish(output.is_some());
                 self.checkpoint().await?;
                 if Instant::now() >= deadline {
                     return Err(StepError::Timeout("screenshot"));
@@ -677,9 +794,11 @@ impl<'a> Engine<'a> {
                 let pending = self.backend.screenshot(*region)?;
                 let png = self.await_native(pending, deadline, "screenshot").await?;
                 if let Some(output) = output {
+                    self.effects.begin("save_screenshot");
                     output.finish(&png).map_err(|e| {
                         BackendError::Native(format!("save screenshot {}: {e}", path.display()))
                     })?;
+                    self.effects.finish(true);
                 }
             }
             Action::LaunchApp {
@@ -695,10 +814,12 @@ impl<'a> Engine<'a> {
                     }
                     _ => app.clone(),
                 };
+                self.effects.begin("launch_app");
                 let pending = self.backend.launch_app(&target, *activate)?;
                 let target = self
                     .await_native(pending, deadline, "application launch")
                     .await?;
+                self.effects.finish(true);
                 loop {
                     self.checkpoint().await?;
                     Self::check_deadline(deadline, "application_ready", timeout_ms)?;
@@ -733,7 +854,9 @@ impl<'a> Engine<'a> {
                 button,
             } => {
                 self.before_input().await?;
+                self.effects.begin("begin_drag");
                 let mut drag = self.backend.begin_drag(*from, *button)?;
+                self.effects.finish(true);
                 // RAII releases even when this future is dropped by its host.
                 self.pointer_motion(*from, *to, *duration_ms, Some(&mut drag))
                     .await?;
@@ -778,7 +901,9 @@ impl<'a> Engine<'a> {
             Action::ActivateApp { app, timeout_ms } => {
                 let deadline = Instant::now()
                     + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
+                self.effects.begin("activate_app");
                 let target = self.backend.activate_app(app)?;
+                self.effects.finish(true);
                 self.ready(&target, deadline).await?;
                 self.focus = Some(target);
                 self.window_focus = None;
@@ -792,8 +917,10 @@ impl<'a> Engine<'a> {
                 let deadline = Instant::now()
                     + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
                 let path = self.options.base_dir.join(path);
+                self.effects.begin("open_file");
                 let pending = self.backend.open_file(&path, app.as_ref())?;
                 let target = self.await_native(pending, deadline, "file open").await?;
+                self.effects.finish(true);
                 self.ready(&target, deadline).await?;
                 self.focus = Some(target);
                 self.window_focus = None;
@@ -812,7 +939,10 @@ impl<'a> Engine<'a> {
                 let mut characters = text.chars().peekable();
                 while let Some(character) = characters.next() {
                     self.before_input().await?;
+                    self.effects.begin("type_character");
                     self.backend.type_character(character)?;
+                    self.effects.finish(true);
+                    self.effects.characters += 1;
                     if characters.peek().is_some() {
                         self.delay(self.scaled(cadence.gap_after(character)))
                             .await?;
@@ -821,12 +951,16 @@ impl<'a> Engine<'a> {
             }
             Action::KeyPress { key, modifiers } => {
                 self.before_input().await?;
+                self.effects.begin("press_key");
                 self.backend.press_key(*key, modifiers)?;
+                self.effects.finish(true);
             }
             Action::MouseMove { x, y, duration_ms } => {
                 self.before_input().await?;
                 if *duration_ms == 0 {
+                    self.effects.begin("move_pointer");
                     self.backend.move_pointer(*x, *y)?;
+                    self.effects.finish(true);
                 } else {
                     let from = self.backend.pointer_position()?;
                     if !from.x.is_finite() || !from.y.is_finite() {
@@ -840,14 +974,18 @@ impl<'a> Engine<'a> {
             }
             Action::MouseClick { button, count } => {
                 self.before_input().await?;
+                self.effects.begin("click");
                 self.backend.click(*button, *count)?;
+                self.effects.finish(true);
             }
             Action::Scroll {
                 horizontal,
                 vertical,
             } => {
                 self.before_input().await?;
+                self.effects.begin("scroll");
                 self.backend.scroll(*horizontal, *vertical)?;
+                self.effects.finish(true);
             }
         }
         Ok(())

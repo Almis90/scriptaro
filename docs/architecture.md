@@ -33,6 +33,10 @@ unused definitions, and permits explicit unverified waivers. Runtime preflight
 therefore includes postcondition capabilities before any effects. Technical waits
 carry an explicit speed-scaling flag in the core model; timing remains engine policy.
 
+`CompiledScript::prepare` returns the prepared take and parallel source references,
+including nested calls and generated waits. Use it before modifying the public
+compiled runtime script; source references describe the original document.
+
 ## Playback
 
 `Engine` borrows a `dyn DesktopBackend` and consumes itself per run. A cloned
@@ -41,6 +45,13 @@ Cancellation is sticky. Broadcast progress events provide action indices and
 states for the desktop host and other observers without exposing typed content or blocking playback.
 Consumers must handle `Lagged` events; the authoritative final result comes from
 `run()`, not the progress stream.
+
+Hosts may additionally attach a synchronous, fallible `EventSink`. Unlike broadcast
+progress, a failed sink record stops playback. `StepEvidence` records backend-call
+evidence before terminal action events, including known typing counts and uncertain
+calls. The CLI uses this sink for optional synchronized JSONL journaling and last-action
+report data. Disk I/O happens at action boundaries, not per character. Slow synchronous
+I/O can delay playback/cancellation; the sink is opt-in for library hosts.
 
 Timing uses Tokio's monotonic clock. Intervals and waits are sliced at 20 ms so
 native events and emergency stops remain responsive. Pauses retain the remaining

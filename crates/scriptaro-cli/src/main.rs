@@ -1,4 +1,5 @@
 mod diagnostic;
+mod journal;
 mod output;
 mod report;
 mod run;
@@ -38,6 +39,8 @@ struct Cli {
 enum Command {
     /// List editable starter recipes; does not access the desktop.
     Recipes,
+    /// Inspect saved execution evidence without accessing the desktop or replaying input.
+    Journal { path: PathBuf },
     /// Create a YAML starter without overwriting an existing file or playing it.
     Init {
         path: PathBuf,
@@ -213,6 +216,7 @@ impl Command {
     fn name(&self) -> &'static str {
         match self {
             Self::Recipes => "recipes",
+            Self::Journal { .. } => "journal",
             Self::Init { .. } => "init",
             Self::Plan { .. } => "plan",
             Self::Validate { .. } => "validate",
@@ -228,6 +232,53 @@ impl Command {
 
 fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
     Ok(match command {
+        Command::Journal { path } => {
+            let result = journal::inspect(&path)?;
+            if !json_output {
+                let status = result["result"]["status"].as_str().unwrap_or("INCOMPLETE");
+                crate::output::line!(
+                    "{}: {status}; {} completed steps",
+                    path.display(),
+                    result["completed_steps"]
+                );
+                if result["truncated_tail"] == true {
+                    crate::output::line!(
+                        "Trailing partial record ignored; original file unchanged."
+                    );
+                }
+                for (key, label) in [
+                    ("last_finished_action", "Last finished"),
+                    ("uncertain_action", "Uncertain"),
+                ] {
+                    if let Some(action) = result[key].as_object() {
+                        crate::output::line!(
+                            "{label}: step {} ({}) at {}; status={}; effects={}; returned typing calls={}",
+                            action["step"],
+                            action["action"].as_str().unwrap_or("?"),
+                            action["source"]["location"].as_str().unwrap_or("?"),
+                            action["status"].as_str().unwrap_or("?"),
+                            action["evidence"]["outcome"].as_str().unwrap_or("unknown"),
+                            action["evidence"]["characters_dispatched"]
+                        );
+                        if let Some(calls) = action["source"]["call_chain"].as_array() {
+                            for call in calls {
+                                crate::output::line!(
+                                    "  via {} → {}",
+                                    call["location"].as_str().unwrap_or("?"),
+                                    call["sequence"].as_str().unwrap_or("?")
+                                );
+                            }
+                        }
+                    }
+                }
+                if result["incomplete"] == true {
+                    crate::output::line!(
+                        "Inspect application state before a fresh take; no replay is performed."
+                    );
+                }
+            }
+            result
+        }
         Command::Recipes => {
             let recipes = scriptaro_core::recipes::RECIPES;
             if !json_output {
@@ -265,11 +316,11 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
         } => {
             let (compiled, _) = load(&path, &variables)?;
             let source_version = compiled.source_version;
-            let input_boundaries = compiled.input_boundaries;
-            let script = compiled
-                .script
+            let prepared = compiled
                 .prepare(section.as_deref(), retake)
                 .map_err(|e| Diagnostic::from(e).at(&path))?;
+            let script = prepared.script;
+            let input_boundaries = compiled.input_boundaries;
             if !json_output {
                 crate::output::line!(
                     "{}: {} actions ({})",
@@ -366,7 +417,13 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                             vertical,
                         } => format!("horizontal={horizontal}; vertical={vertical}"),
                     };
-                    crate::output::line!("{:>4}  {}  {}", index + 1, action.kind(), detail);
+                    crate::output::line!(
+                        "{:>4}  {}  {}  [{}]",
+                        index + 1,
+                        action.kind(),
+                        detail,
+                        prepared.sources[index].location
+                    );
                 }
                 crate::output::line!(
                     "No actions executed. Review selectors, reset effects, and waits before desktop playback."
@@ -375,7 +432,7 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
             if !json_output {
                 output::boundaries(input_boundaries.as_ref());
             }
-            json!({"source_version":source_version,"input_boundaries":input_boundaries,"script":path.to_string_lossy(),"name":script.name,"section":section,"retake":retake,"defaults":script.defaults,"total_steps":script.steps.len(),"steps":output::plan(&script),"required_capabilities":required_capabilities(&script.steps).iter().map(output::capability).collect::<Vec<_>>(),"effects_executed":false})
+            json!({"source_version":source_version,"input_boundaries":input_boundaries,"script":path.to_string_lossy(),"name":script.name,"section":section,"retake":retake,"defaults":script.defaults,"total_steps":script.steps.len(),"steps":output::plan(&script).into_iter().zip(&prepared.sources).map(|(mut action, source)| { action["source"] = json!(source); action }).collect::<Vec<_>>(),"required_capabilities":required_capabilities(&script.steps).iter().map(output::capability).collect::<Vec<_>>(),"effects_executed":false})
         }
         Command::Validate {
             script: path,

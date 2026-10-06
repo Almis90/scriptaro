@@ -18,6 +18,18 @@
 Source and documentation are published on GitHub. Registry packages and binary
 releases remain unpublished.
 
+### Execution evidence — 2026-10-06
+
+- Added optional `run --journal PATH` synchronized JSONL records and read-only
+  `journal PATH` inspection, with bounded files, explicit storage failures,
+  incomplete-run detection and uncertain unfinished actions. No automatic replay.
+- Plans, reports and playback failures map expanded actions to original YAML paths,
+  section phases, sequence call chains and generated postcondition waits.
+- Added a fallible engine event sink and partial dispatch evidence, including
+  returned typing-call counts. Dispatch does not establish target acceptance.
+- Journals omit prepared text, selectors, values and raw error messages. Added
+  fault-injection and killed-process simulation coverage; no live desktop runs.
+
 ### Input boundaries and timing — 2026-10-06
 
 - Version 2 inputs accept authored `after` postconditions, compiled into bounded

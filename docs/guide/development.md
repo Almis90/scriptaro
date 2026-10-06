@@ -306,3 +306,15 @@ form previews under `target/`. The main-window preview was visually inspected.
 This does not constitute a click-through test of every modal operation or a live
 target test. No live desktop suite or repeated 20-run verification was performed.
 The local bundle and documentation were rebuilt without publishing.
+
+
+## Execution journal verification (2026-10-06)
+
+The integrated workspace pass covered 153 Rust tests. Final review added three
+regressions for malformed journals, partial evidence after a disk failure, and
+source-map size amplification; the affected CLI/core checks passed. Coverage
+includes nested source references, reset/setup/readiness ordering, intent and
+outcome write failures, partial typing, cancellation, privacy, and a hard-killed
+simulated CLI process. Completed records survive the kill; an unfinished action
+is reported as uncertain. No live desktop runs or repeated native suites were
+performed. These checks do not qualify native acceptance in additional apps.

@@ -1,6 +1,8 @@
 //! Bounded authoring compiler. It performs no filesystem, environment or desktop access.
 use super::{
-    InputBoundaryPolicy, InputBoundarySummary, ScriptError, input_boundaries::Annotations,
+    CallSite, InputBoundaryPolicy, InputBoundarySummary, ScriptError, SourceOrigin,
+    input_boundaries::Annotations,
+    provenance::{SectionMap, SourceMap, origins},
 };
 use crate::{
     Action, AppSelector, Condition, ControlAssertion, ControlSelector, Defaults, LaunchTarget,
@@ -16,6 +18,7 @@ pub struct CompiledScript {
     pub script: Script,
     pub source_version: u32,
     pub input_boundaries: Option<InputBoundarySummary>,
+    pub(super) source_map: SourceMap,
 }
 
 #[derive(Deserialize)]
@@ -130,6 +133,7 @@ pub fn compile(
             return Err(invalid("variables", "overrides require script version 2"));
         }
         return Ok(CompiledScript {
+            source_map: SourceMap::legacy(&script)?,
             script,
             source_version: 1,
             input_boundaries: None,
@@ -177,6 +181,12 @@ pub fn compile(
         }
     }
     let mut compiler = Compiler {
+        origins: Vec::new(),
+        origin_bytes: 0,
+        record_origins: false,
+        calls: Vec::new(),
+        section: None,
+        phase: "steps",
         variables,
         boundaries: InputBoundarySummary {
             policy: source.input_boundaries,
@@ -237,30 +247,84 @@ pub fn compile(
         compiler.expand(
             sequence.steps(),
             &format!("sequences.{name}"),
+            &format!("sequences.{name}"),
             &mut vec![name.clone()],
         )?;
     }
     compiler.locals.clear();
+    compiler.origins.clear();
+    compiler.record_origins = true;
     // Definition checks enforce the policy but are not runtime declarations.
     compiler.boundaries = InputBoundarySummary {
         policy: source.input_boundaries,
         ..Default::default()
     };
-    let steps = compiler.expand(&source.steps, "steps", &mut vec![])?;
+    let steps = compiler.expand(&source.steps, "steps", "steps", &mut vec![])?;
+    let mut source_map = SourceMap {
+        steps: std::mem::take(&mut compiler.origins),
+        sections: Vec::new(),
+    };
     let mut sections = Vec::new();
     for (index, section) in source.sections.iter().enumerate() {
         let location = format!("sections[{}]", index + 1);
-        let setup = compiler.expand(&section.setup, &format!("{location}.setup"), &mut vec![])?;
+        compiler.section = Some(section.name.clone());
+        compiler.phase = "setup";
+        let setup = compiler.expand(
+            &section.setup,
+            &format!("{location}.setup"),
+            &format!("{location}.setup"),
+            &mut vec![],
+        )?;
+        let setup_origins = std::mem::take(&mut compiler.origins);
+        compiler.phase = "reset";
         let reset = section
             .reset
             .as_ref()
-            .map(|steps| compiler.expand(steps, &format!("{location}.reset"), &mut vec![]))
+            .map(|steps| {
+                compiler.expand(
+                    steps,
+                    &format!("{location}.reset"),
+                    &format!("{location}.reset"),
+                    &mut vec![],
+                )
+            })
             .transpose()?;
+        let reset_origins = std::mem::take(&mut compiler.origins);
         let mut requires = section.requires.clone();
         for condition in &mut requires {
             compiler.condition(condition, &format!("{location}.requires"))?;
         }
-        let steps = compiler.expand(&section.steps, &format!("{location}.steps"), &mut vec![])?;
+        compiler.phase = "steps";
+        let steps = compiler.expand(
+            &section.steps,
+            &format!("{location}.steps"),
+            &format!("{location}.steps"),
+            &mut vec![],
+        )?;
+        compiler.origin_bytes = compiler.origin_bytes.saturating_add(
+            section
+                .name
+                .len()
+                .saturating_add(location.len() + 32)
+                .saturating_mul(section.requires.len()),
+        );
+        if compiler.origin_bytes > MAX_SCRIPT_BYTES {
+            return Err(invalid(
+                "source_map",
+                "source references exceed the 4 MiB compilation budget",
+            ));
+        }
+        source_map.sections.push(SectionMap {
+            setup: setup_origins,
+            reset: reset_origins,
+            requires: origins(
+                &format!("{location}.requires"),
+                section.requires.len(),
+                Some(&section.name),
+                "requires",
+            ),
+            steps: std::mem::take(&mut compiler.origins),
+        });
         sections.push(Section {
             name: section.name.clone(),
             setup,
@@ -278,6 +342,7 @@ pub fn compile(
     };
     script.validate()?;
     Ok(CompiledScript {
+        source_map,
         script,
         source_version: source.version,
         input_boundaries: Some(compiler.boundaries),
@@ -290,6 +355,12 @@ struct Binding {
 }
 
 struct Compiler<'a> {
+    origins: Vec<SourceOrigin>,
+    origin_bytes: usize,
+    record_origins: bool,
+    calls: Vec<CallSite>,
+    section: Option<String>,
+    phase: &'static str,
     variables: BTreeMap<String, String>,
     boundaries: InputBoundarySummary,
     // Unresolved bindings exist only during definition checks, never in playback.
@@ -300,6 +371,28 @@ struct Compiler<'a> {
     bytes: usize,
 }
 impl Compiler<'_> {
+    fn record_origin(&mut self, origin: &SourceOrigin) -> Result<(), ScriptError> {
+        if self.record_origins {
+            self.origin_bytes = self.origin_bytes.saturating_add(
+                origin.location.len()
+                    + origin.section.as_ref().map_or(0, String::len)
+                    + origin
+                        .call_chain
+                        .iter()
+                        .map(|call| call.location.len() + call.sequence.len())
+                        .sum::<usize>(),
+            );
+            if self.origin_bytes > MAX_SCRIPT_BYTES {
+                return Err(invalid(
+                    "source_map",
+                    "source references exceed the 4 MiB compilation budget",
+                ));
+            }
+            self.origins.push(origin.clone());
+        }
+        Ok(())
+    }
+
     fn visit(&mut self, location: &str) -> Result<(), ScriptError> {
         self.actions += 1;
         if self.actions > 10_000 {
@@ -472,11 +565,13 @@ impl Compiler<'_> {
         &mut self,
         steps: &[Value],
         at: &str,
+        source_at: &str,
         stack: &mut Vec<String>,
     ) -> Result<Vec<Action>, ScriptError> {
         let mut result = Vec::new();
         for (index, value) in steps.iter().enumerate() {
             let location = format!("{at}[{}]", index + 1);
+            let source_location = format!("{source_at}[{}]", index + 1);
             self.visit(&location)?;
             if value.get("action").and_then(Value::as_str) == Some("call") {
                 let call: Call = serde_yaml::from_value(value.clone())
@@ -530,12 +625,27 @@ impl Compiler<'_> {
                 }
                 let previous = std::mem::replace(&mut self.locals, locals);
                 stack.push(call.sequence.clone());
+                self.calls.push(CallSite {
+                    sequence: call.sequence.clone(),
+                    location: source_location,
+                });
+                let definition = format!(
+                    "sequences.{}{}",
+                    call.sequence,
+                    if matches!(sequence, Sequence::Parameterized(_)) {
+                        ".steps"
+                    } else {
+                        ""
+                    }
+                );
                 let expanded = self.expand(
                     sequence.steps(),
                     &format!("{location} -> {}", call.sequence),
+                    &definition,
                     stack,
                 );
                 stack.pop();
+                self.calls.pop();
                 self.locals = previous;
                 result.extend(expanded?);
             } else {
@@ -546,6 +656,14 @@ impl Compiler<'_> {
                 let input = annotations.check(&action, self.boundaries.policy, &location)?;
                 self.action(&mut action, &location)?;
                 result.push(action);
+                let origin = SourceOrigin {
+                    location: source_location,
+                    section: self.section.clone(),
+                    phase: self.phase.into(),
+                    call_chain: self.calls.clone(),
+                    generated: None,
+                };
+                self.record_origin(&origin)?;
                 if let Some(after) = annotations.after {
                     let after_location = format!("{location}.after");
                     self.visit(&after_location)?;
@@ -555,6 +673,11 @@ impl Compiler<'_> {
                     };
                     self.action(&mut wait, &after_location)?;
                     result.push(wait);
+                    self.record_origin(&SourceOrigin {
+                        location: format!("{}.after", origin.location),
+                        generated: Some("after".into()),
+                        ..origin
+                    })?;
                     self.boundaries.postconditions += 1;
                 } else if annotations.unverified {
                     self.boundaries.explicit_waivers += 1;

@@ -1,6 +1,7 @@
 use crate::{
     VariableArgs,
     diagnostic::Diagnostic,
+    journal::Journal,
     load, native_backend,
     output::{Outcome, RunData},
     report::ReportFile,
@@ -40,6 +41,9 @@ pub struct RunArgs {
     /// Save a JSON result to a new file. Existing paths are never overwritten.
     #[arg(long, value_name = "PATH")]
     pub report: Option<PathBuf>,
+    /// Save synchronized action intent/outcome records to a new JSONL file.
+    #[arg(long, value_name = "PATH")]
+    pub journal: Option<PathBuf>,
 }
 
 pub async fn execute(args: RunArgs, json_output: bool) -> Outcome {
@@ -59,6 +63,12 @@ where
 {
     let started = Instant::now();
     let mut data = RunData {
+        run_id: crate::journal::run_id(),
+        journal: args
+            .journal
+            .as_ref()
+            .map(|path| path.to_string_lossy().into()),
+        last_action: None,
         script: args.script.to_string_lossy().into(),
         source_version: None,
         input_boundaries: None,
@@ -93,7 +103,21 @@ where
             let mut result = Outcome::failed("run", error); result.data = json!(data); return result;
         }
     };
-    let result = playback(&args, json_output, &mut data, backend).await;
+    let mut journal = Journal::reserve(
+        args.journal.as_deref(),
+        &data.run_id,
+        &args.script,
+        data.mode,
+        data.started_at_unix_ms,
+    );
+    let result = match &mut journal {
+        Ok(journal) => {
+            let result = playback(&args, json_output, &mut data, journal, backend).await;
+            data.last_action = journal.last_action.clone();
+            result
+        }
+        Err(error) => Err(error.clone()),
+    };
     data.elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     let mut outcome = match result {
         Ok(status) => {
@@ -132,6 +156,28 @@ where
             result
         }
     };
+    let journal_error = match &mut journal {
+        Ok(journal) => journal
+            .finish(
+                data.status,
+                data.completed_steps,
+                outcome.exit_code,
+                outcome.error.as_ref().map(|error| error.code),
+            )
+            .err(),
+        Err(error) => Some(error.clone()),
+    };
+    if let Some(error) = journal_error {
+        outcome.ok = false;
+        outcome.exit_code = 1;
+        if outcome.error.is_none() {
+            outcome.error = Some(error.clone());
+        } else if !json_output {
+            use std::io::Write;
+            let _ = writeln!(std::io::stderr().lock(), "{}", error.text());
+        }
+        outcome.journal_error = Some(error);
+    }
     if let Some(sink) = sink {
         if let Err(error) = sink.finish(&outcome) {
             outcome.ok = false;
@@ -154,6 +200,7 @@ async fn playback<F>(
     args: &RunArgs,
     json_output: bool,
     data: &mut RunData,
+    journal: &mut Journal,
     backend: F,
 ) -> Result<RunStatus, Diagnostic>
 where
@@ -172,10 +219,10 @@ where
     }
     let (compiled, base_dir) = load(&args.script, &args.variables)?;
     data.source_version = Some(compiled.source_version);
+    let prepared = compiled.prepare(args.section.as_deref(), args.retake)?;
+    let script = prepared.script;
+    journal.sources = prepared.sources;
     data.input_boundaries = compiled.input_boundaries;
-    let script = compiled
-        .script
-        .prepare(args.section.as_deref(), args.retake)?;
     data.total_steps = Some(script.steps.len());
     if !json_output {
         crate::output::boundaries(data.input_boundaries.as_ref());
@@ -220,7 +267,8 @@ where
             skip_delays: args.dry_run && !args.realtime,
             initial_delay: Duration::from_millis(args.start_delay_ms),
         },
-    );
+    )
+    .with_event_sink(journal);
     let mut events = engine.subscribe();
     let signal = signal_task(engine.controller()).map_err(|error| {
         Diagnostic::new(
@@ -261,7 +309,18 @@ where
             if let EngineError::Step { step, .. } = &error {
                 data.completed_steps = step.saturating_sub(1);
             }
-            Err(error.into())
+            if let EngineError::Evidence {
+                completed_steps, ..
+            } = &error
+            {
+                data.completed_steps = *completed_steps;
+            }
+            let mut diagnostic = Diagnostic::from(error);
+            diagnostic.context.source = diagnostic
+                .context
+                .step
+                .and_then(|step| journal.sources.get(step - 1).cloned());
+            Err(diagnostic)
         }
     }
 }
@@ -339,13 +398,16 @@ mod tests {
             speed: 1.,
             start_delay_ms: 0,
             report: Some(scratch.0.join("report.json")),
+            journal: None,
         }
     }
     #[tokio::test]
     async fn partial_failure_and_preflight_failure_are_saved_without_retries() {
         for unsupported in [false, true] {
             let scratch = Scratch::new();
-            let args = args(&scratch);
+            let mut args = args(&scratch);
+            args.journal = Some(scratch.0.join("take.jsonl"));
+            let journal_path = args.journal.clone().unwrap();
             let path = args.report.clone().unwrap();
             let calls = Rc::new(Cell::new(0));
             let fixture = Fixture {
@@ -367,6 +429,27 @@ mod tests {
                 );
             } else {
                 assert_eq!(calls.get(), 2);
+                assert_eq!(
+                    outcome
+                        .error
+                        .as_ref()
+                        .unwrap()
+                        .context
+                        .source
+                        .as_ref()
+                        .unwrap()
+                        .location,
+                    "steps[2]"
+                );
+                assert_eq!(
+                    outcome.data["last_action"]["evidence"]["characters_dispatched"],
+                    1
+                );
+                assert_eq!(
+                    crate::journal::inspect(&journal_path).unwrap()["last_finished_action"]["evidence"]
+                        ["characters_dispatched"],
+                    1
+                );
                 assert_eq!(outcome.data["completed_steps"], 1);
                 assert_eq!(outcome.data["failed_step"], 2);
                 assert_eq!(
