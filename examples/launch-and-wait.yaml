@@ -1,0 +1,25 @@
+version: 2
+name: Launch and wait for a field
+variables:
+  app: 'REPLACE_WITH_APP_IDENTIFIER'
+  window: 'REPLACE_WITH_EXACT_WINDOW_TITLE'
+  field: 'REPLACE_WITH_FIELD_IDENTIFIER'
+  expected: 'Ready'
+steps:
+  - action: launch_app
+    app: {by: identifier, value: '${app}'}
+    timeout_ms: 15000
+  - action: wait_until
+    condition:
+      kind: control_matches
+      control: &field
+        window:
+          app: {by: identifier, value: '${app}'}
+          title: '${window}'
+        role: text_field
+        identifier: '${field}'
+      expect: {property: text, equals: '${expected}'}
+    timeout_ms: 10000
+  - action: assert_control
+    control: *field
+    expect: {property: text, equals: '${expected}'}

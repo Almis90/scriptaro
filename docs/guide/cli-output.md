@@ -53,7 +53,7 @@ permissions or `native_supported: false`. Check its data before native playback.
 `plan` returns flattened `steps`, `total_steps`, `defaults`,
 `required_capabilities` and `effects_executed: false`. Step numbers start at one.
 A selected take includes setup and readiness; `--retake` also includes reset.
-Actions use the YAML action field names. Text assertions replace expected
+Actions use the YAML action field names. Text assertions and `control_matches` readiness conditions replace expected
 `equals` text with its `characters` count; actual control values are never included. `type_text` replaces the prepared text
 with `characters` (Unicode scalar count) and effective `interval_ms`.
 Defaulted action timeouts are resolved to numeric `timeout_ms` values.

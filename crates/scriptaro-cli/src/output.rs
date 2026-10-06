@@ -57,6 +57,7 @@ impl Outcome {
 pub fn capability(capability: &Capability) -> &'static str {
     match capability {
         Capability::Applications => "applications",
+        Capability::Launch => "launch",
         Capability::OpenFile => "open_file",
         Capability::Keyboard => "keyboard",
         Capability::Pointer => "pointer",
@@ -79,6 +80,9 @@ pub fn plan(script: &Script) -> Vec<Value> {
         };
         if let Action::AssertControl { expect: scriptaro_core::ControlAssertion::Text(text), .. } = action {
             value["expect"] = json!({"property":"text", "characters":text.chars().count()});
+        }
+        if let Action::WaitUntil { condition: scriptaro_core::Condition::ControlMatches { expect: scriptaro_core::ControlAssertion::Text(text), .. }, .. } = action {
+            value["condition"]["expect"] = json!({"property":"text", "characters":text.chars().count()});
         }
         value["step"] = json!(index+1);
         if let Some(timeout) = value.get_mut("timeout_ms") { if timeout.is_null() { *timeout = json!(script.defaults.timeout_ms); } }

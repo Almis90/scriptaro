@@ -62,6 +62,11 @@ be made atomic by the engine.
 
 ## Waiting for readiness
 
+[`launch_app`](/guide/launch-and-readiness) can start an application and wait for
+its process readiness and optional activation. `control_matches` conditions
+wait for exact text or a control state, using the assertion comparison rules.
+
+
 Use `wait_until` with `app_active`, `window_exists`, or `window_active` instead of
 guessing how long window creation/focus will take. A readiness wait observes the
 desktop without changing it, and never changes the current input target.

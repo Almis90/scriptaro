@@ -35,6 +35,7 @@ export default defineConfig({
         { text: 'CLI output and reports', link: '/guide/cli-output' },
         { text: 'Variables and sequences', link: '/guide/reuse' },
         { text: 'Motion and assertions', link: '/guide/motion-and-assertions' },
+        { text: 'Launch and readiness', link: '/guide/launch-and-readiness' },
         { text: 'Desktop interface', link: '/guide/desktop' },
         { text: 'macOS setup', link: '/guide/macos' },
       ] },

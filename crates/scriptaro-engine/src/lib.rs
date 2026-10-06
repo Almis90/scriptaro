@@ -4,7 +4,8 @@ mod control;
 pub use control::{ControlState, PlaybackController};
 
 use scriptaro_core::{
-    Action, AppSelector, Condition, ControlSelector, Point, Script, ValidationError, WindowSelector,
+    Action, AppSelector, Condition, ControlSelector, LaunchTarget, Point, Script, ValidationError,
+    WindowSelector,
 };
 use scriptaro_platform::{
     BackendError, ControlTarget, DesktopBackend, DragSession, PendingOpen, WindowTarget,
@@ -173,6 +174,19 @@ impl<'a> Engine<'a> {
         // Catch missing files before activating any apps. Simulation allows draft paths.
         if !self.backend.is_simulated() {
             for step in &script.steps {
+                if let Action::LaunchApp {
+                    app: LaunchTarget::Path(path),
+                    ..
+                } = step
+                {
+                    let path = self.options.base_dir.join(path);
+                    if !path.exists() {
+                        return Err(EngineError::Preflight(BackendError::Native(format!(
+                            "application path does not exist: {}",
+                            path.display()
+                        ))));
+                    }
+                }
                 if let Action::OpenFile { path, .. } = step {
                     let path = self.options.base_dir.join(path);
                     if !path.is_file() {
@@ -323,20 +337,26 @@ impl<'a> Engine<'a> {
         }
     }
 
-    async fn await_open(
+    async fn await_application(
         &mut self,
         mut pending: PendingOpen,
         deadline: Instant,
+        operation: &'static str,
     ) -> Result<AppSelector, StepError> {
         loop {
             self.checkpoint().await?;
             if Instant::now() >= deadline {
-                return Err(StepError::Timeout("file open"));
+                return Err(StepError::Timeout(operation));
             }
             tokio::select! {
                 biased;
                 _ = self.commands.changed() => {},
-                result = &mut pending => return Ok(result?),
+                result = &mut pending => {
+                    let target=result?;
+                    self.checkpoint().await?;
+                    if Instant::now() >= deadline { return Err(StepError::Timeout(operation)); }
+                    return Ok(target);
+                },
                 _ = tokio::time::sleep_until(deadline.min(Instant::now() + TICK)) => {},
             }
         }
@@ -376,7 +396,7 @@ impl<'a> Engine<'a> {
             let satisfied = self.backend.observe(condition)?;
             // A slow native query must not turn an expired deadline into success.
             Self::check_deadline(deadline, condition.kind(), timeout_ms)?;
-            if satisfied {
+            if satisfied && self.controller.state() == ControlState::Running {
                 return Ok(());
             }
             self.poll_again(deadline).await;
@@ -564,6 +584,40 @@ impl<'a> Engine<'a> {
 
     async fn execute(&mut self, action: &Action, script: &Script) -> Result<(), StepError> {
         match action {
+            Action::LaunchApp {
+                app,
+                activate,
+                timeout_ms,
+            } => {
+                let timeout_ms = timeout_ms.unwrap_or(script.defaults.timeout_ms);
+                let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+                let target = match app {
+                    LaunchTarget::Path(path) => {
+                        LaunchTarget::Path(self.options.base_dir.join(path))
+                    }
+                    _ => app.clone(),
+                };
+                let pending = self.backend.launch_app(&target, *activate)?;
+                let target = self
+                    .await_application(pending, deadline, "application launch")
+                    .await?;
+                loop {
+                    self.checkpoint().await?;
+                    Self::check_deadline(deadline, "application_ready", timeout_ms)?;
+                    let ready = self.backend.is_app_ready(&target)?;
+                    let active = !*activate || (ready && self.backend.is_app_active(&target)?);
+                    Self::check_deadline(deadline, "application_ready", timeout_ms)?;
+                    if ready && active && self.controller.state() == ControlState::Running {
+                        break;
+                    }
+                    self.poll_again(deadline).await;
+                }
+                if *activate {
+                    self.focus = Some(target);
+                    self.window_focus = None;
+                    self.control_focus = None;
+                }
+            }
             Action::AssertControl { control, expect } => {
                 self.checkpoint().await?;
                 let matched = self.backend.assert_control(control, expect)?;
@@ -631,7 +685,9 @@ impl<'a> Engine<'a> {
                     + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
                 let path = self.options.base_dir.join(path);
                 let pending = self.backend.open_file(&path, app.as_ref())?;
-                let target = self.await_open(pending, deadline).await?;
+                let target = self
+                    .await_application(pending, deadline, "file open")
+                    .await?;
                 self.ready(&target, deadline).await?;
                 self.focus = Some(target);
                 self.window_focus = None;

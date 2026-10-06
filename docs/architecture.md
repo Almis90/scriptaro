@@ -137,3 +137,9 @@ macOS uses CoreGraphics drag events and SDK timestamp/uptime functions for
 preallocated events. Assertions read only the requested Accessibility property;
 discovery still does not read field values. Native values never enter engine
 events or reports. Simulated assertions are explicitly marked as assumed.
+
+`LaunchTarget` distinguishes installed identifiers and application paths from
+running process selectors. The backend dispatches launch once and returns an
+owned `PendingLaunch`; the engine polls readiness for the actual process and
+optionally establishes its focus guard. `control_matches` conditions reuse
+property comparisons through the existing bounded readiness loop.

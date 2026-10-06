@@ -4,8 +4,8 @@ use crate::{
     PendingOpen, WindowTarget,
 };
 use scriptaro_core::{
-    AppSelector, Condition, ControlAssertion, ControlSelector, Key, Modifier, MouseButton, Point,
-    WindowSelector,
+    AppSelector, Condition, ControlAssertion, ControlSelector, Key, LaunchTarget, Modifier,
+    MouseButton, Point, WindowSelector,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -15,6 +15,7 @@ use std::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
+    Launch(LaunchTarget, bool),
     AssertControl(ControlSelector, ControlAssertion),
     BeginDrag(Point, MouseButton),
     FocusControl(ControlSelector),
@@ -48,6 +49,7 @@ impl DesktopBackend for RecordingBackend {
     fn capabilities(&self) -> &'static [Capability] {
         &[
             Capability::Applications,
+            Capability::Launch,
             Capability::OpenFile,
             Capability::Keyboard,
             Capability::Pointer,
@@ -71,6 +73,27 @@ impl DesktopBackend for RecordingBackend {
         self.active = Some(app.clone());
         self.active_window = None;
         Ok(app.clone())
+    }
+    fn launch_app(
+        &mut self,
+        app: &LaunchTarget,
+        activate: bool,
+    ) -> BackendResult<crate::PendingLaunch> {
+        self.operations
+            .push(Operation::Launch(app.clone(), activate));
+        let target = match app {
+            LaunchTarget::Identifier(id) => AppSelector::Identifier(id.clone()),
+            LaunchTarget::Path(path) => AppSelector::Name(path.display().to_string()),
+        };
+        if activate {
+            self.active = Some(target.clone());
+            self.active_window = None;
+            self.active_control = None;
+        }
+        Ok(Box::pin(async move { Ok(target) }))
+    }
+    fn is_app_ready(&mut self, _: &AppSelector) -> BackendResult<bool> {
+        Ok(true)
     }
     fn is_app_active(&mut self, app: &AppSelector) -> BackendResult<bool> {
         Ok(self.active.as_ref() == Some(app))

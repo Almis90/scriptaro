@@ -118,3 +118,16 @@ releases remain unpublished.
   metadata, examples and documentation. Guided forms remain deferred.
 - Added focused virtual-time, cleanup, validation and report regression coverage;
   no live desktop compatibility claim is made for these new actions.
+
+### Application launch and value readiness — 2026-10-06
+
+- Added `launch_app` with identifier/path targets, default foreground activation,
+  optional background launch and one shared callback/readiness timeout. macOS
+  uses NSWorkspace with existing-instance reuse; no shell or repeated launch.
+- Added `wait_until.control_matches` using assertion-style text/state comparisons,
+  including section prerequisites and version 2 variables. Missing/mismatching
+  values wait; ambiguity and unreadable attributes remain immediate errors.
+- Preserved focus guards for background launches, redacted expected readiness
+  text from plans, and added examples, documentation and focused regression tests.
+- No new live desktop runs; native application compatibility remains to be checked
+  in the intended target app.

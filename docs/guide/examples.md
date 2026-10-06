@@ -94,3 +94,10 @@ scriptaro plan examples/assertions.yaml --json
 ```
 
 See [Motion and control assertions](/guide/motion-and-assertions).
+
+## Launch and value readiness
+
+`examples/launch-and-wait.yaml` starts an application, waits for a field to expose
+the expected text, then asserts that value. Replace the app/window/field variables
+before native playback. Rehearse with `scriptaro run examples/launch-and-wait.yaml --dry-run`.
+See [Launching apps and waiting for values](/guide/launch-and-readiness).

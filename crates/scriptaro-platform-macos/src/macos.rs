@@ -18,8 +18,8 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSError, NSString, NSURL};
 use scriptaro_core::{
-    AppSelector, Condition, ControlAssertion, ControlSelector, Key, Modifier, MouseButton, Point,
-    WindowSelector,
+    AppSelector, Condition, ControlAssertion, ControlSelector, Key, LaunchTarget, Modifier,
+    MouseButton, Point, WindowSelector,
 };
 use scriptaro_platform::{
     ApplicationInfo, BackendError, BackendResult, Capability, ControlInfo, ControlTarget,
@@ -219,6 +219,7 @@ impl DesktopBackend for MacOsBackend {
     fn capabilities(&self) -> &'static [Capability] {
         &[
             Capability::Applications,
+            Capability::Launch,
             Capability::OpenFile,
             Capability::Keyboard,
             Capability::Pointer,
@@ -472,6 +473,7 @@ impl DesktopBackend for MacOsBackend {
     }
     fn observe(&mut self, condition: &Condition) -> BackendResult<bool> {
         autoreleasepool(|_| match condition {
+            Condition::ControlMatches { control, expect } => self.assert_control(control, expect),
             Condition::ControlExists { control }
             | Condition::ControlEnabled { control }
             | Condition::ControlFocused { control } => {
@@ -495,6 +497,96 @@ impl DesktopBackend for MacOsBackend {
                 };
                 self.window_focused(pid, &target)
             }
+        })
+    }
+    fn launch_app(
+        &mut self,
+        target: &LaunchTarget,
+        activate: bool,
+    ) -> BackendResult<scriptaro_platform::PendingLaunch> {
+        autoreleasepool(|_| {
+            let url = match target {
+                LaunchTarget::Identifier(id) => {
+                    self.app_url(&AppSelector::Identifier(id.clone()))?
+                }
+                LaunchTarget::Path(path) => {
+                    let absolute = path
+                        .canonicalize()
+                        .map_err(|e| native(&format!("cannot resolve application path: {e}")))?;
+                    let mut matches = 0;
+                    for app in self.workspace.runningApplications() {
+                        if let Some(path) = app.bundleURL().and_then(|url| url.path()) {
+                            if Path::new(&path.to_string())
+                                .canonicalize()
+                                .is_ok_and(|path| path == absolute)
+                            {
+                                matches += 1;
+                            }
+                        }
+                    }
+                    if matches > 1 {
+                        return Err(native(
+                            "multiple running instances use this application path; activate_app with a PID can select one",
+                        ));
+                    }
+                    NSURL::fileURLWithPath(&NSString::from_str(
+                        absolute
+                            .to_str()
+                            .ok_or_else(|| native("application path must be UTF-8"))?,
+                    ))
+                }
+            };
+            let configuration = NSWorkspaceOpenConfiguration::new();
+            configuration.setActivates(activate);
+            configuration.setCreatesNewApplicationInstance(false);
+            configuration.setAllowsRunningApplicationSubstitution(false);
+            configuration.setPromptsUserIfNeeded(false);
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            let sender = Mutex::new(Some(sender));
+            let completion =
+                RcBlock::new(move |app: *mut NSRunningApplication, error: *mut NSError| {
+                    // SAFETY: AppKit owns these nullable callback objects. Copy PID/error
+                    // into owned Rust data; never move native objects between threads.
+                    let result = unsafe {
+                        if let Some(error) = error.as_ref() {
+                            Err(native(&error.localizedDescription().to_string()))
+                        } else if let Some(app) = app.as_ref() {
+                            let pid = app.processIdentifier();
+                            if pid > 0 {
+                                Ok(AppSelector::Pid(pid as u32))
+                            } else {
+                                Err(native("launched application has no process ID"))
+                            }
+                        } else {
+                            Err(native(
+                                "application launch returned no application or error",
+                            ))
+                        }
+                    };
+                    if let Ok(mut sender) = sender.lock() {
+                        if let Some(sender) = sender.take() {
+                            let _ = sender.send(result);
+                        }
+                    }
+                });
+            self.workspace
+                .openApplicationAtURL_configuration_completionHandler(
+                    &url,
+                    &configuration,
+                    Some(&completion),
+                );
+            Ok(Box::pin(async move {
+                receiver
+                    .await
+                    .map_err(|_| native("application launch callback was dropped"))?
+            }) as scriptaro_platform::PendingLaunch)
+        })
+    }
+    fn is_app_ready(&mut self, app: &AppSelector) -> BackendResult<bool> {
+        autoreleasepool(|_| match self.resolve_running(app) {
+            Ok(app) => Ok(!app.isTerminated() && app.isFinishedLaunching()),
+            Err(BackendError::AppNotFound(_)) => Ok(false),
+            Err(error) => Err(error),
         })
     }
     fn open_file(

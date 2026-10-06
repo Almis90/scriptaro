@@ -1,6 +1,6 @@
 use crate::{
-    Action, AppSelector, Condition, ControlAssertion, ControlRole, ControlSelector, Script,
-    WindowSelector,
+    Action, AppSelector, Condition, ControlAssertion, ControlRole, ControlSelector, LaunchTarget,
+    Script, WindowSelector,
 };
 use thiserror::Error;
 
@@ -118,35 +118,35 @@ impl Script {
                     control: selector,
                     expect,
                 } => {
-                    control(selector, &location)?;
-                    match expect {
-                        ControlAssertion::Text(text) => {
-                            if !matches!(
-                                selector.role,
-                                ControlRole::TextField
-                                    | ControlRole::TextArea
-                                    | ControlRole::ComboBox
-                            ) {
-                                return Err(ValidationError::at(
-                                    &location,
-                                    "text assertions require a text field, text area or combo box",
-                                ));
-                            }
-                            text_bytes = text_bytes.saturating_add(text.len());
-                            if text_bytes > MAX_SCRIPT_BYTES || text.contains('\0') {
-                                return Err(ValidationError::at(
-                                    &location,
-                                    "assertion text must contain no NUL and combined text must not exceed 4 MiB",
-                                ));
-                            }
-                        }
-                        ControlAssertion::Checked(_) if selector.role != ControlRole::CheckBox => {
+                    assertion(selector, expect, &location, &mut text_bytes)?;
+                }
+                Action::LaunchApp {
+                    app: target,
+                    timeout_ms,
+                    ..
+                } => {
+                    match target {
+                        LaunchTarget::Identifier(id)
+                            if id.trim().is_empty() || id.contains('\0') =>
+                        {
                             return Err(ValidationError::at(
                                 &location,
-                                "checked assertions require a check box",
+                                "launch identifier must be nonempty without NUL",
+                            ));
+                        }
+                        LaunchTarget::Path(path)
+                            if path.as_os_str().is_empty()
+                                || path.to_str().is_none_or(|s| s.contains('\0')) =>
+                        {
+                            return Err(ValidationError::at(
+                                &location,
+                                "launch path must be nonempty UTF-8 without NUL",
                             ));
                         }
                         _ => {}
+                    }
+                    if let Some(ms) = timeout_ms {
+                        duration(*ms, &location, true)?;
                     }
                 }
                 Action::MouseDrag {
@@ -166,6 +166,9 @@ impl Script {
                     timeout_ms,
                 } => {
                     match condition {
+                        Condition::ControlMatches { control, expect } => {
+                            assertion(control, expect, &location, &mut text_bytes)?
+                        }
                         Condition::ControlExists { control: selector }
                         | Condition::ControlEnabled { control: selector }
                         | Condition::ControlFocused { control: selector } => {
@@ -296,4 +299,42 @@ impl Script {
         }
         Ok(())
     }
+}
+
+fn assertion(
+    selector: &ControlSelector,
+    expect: &ControlAssertion,
+    location: &str,
+    text_bytes: &mut usize,
+) -> Result<(), ValidationError> {
+    control(selector, location)?;
+    match expect {
+        ControlAssertion::Text(text) => {
+            if !matches!(
+                selector.role,
+                ControlRole::TextField | ControlRole::TextArea | ControlRole::ComboBox
+            ) {
+                return Err(ValidationError::at(
+                    location,
+                    "text assertions require a text field, text area or combo box",
+                ));
+            }
+            *text_bytes = text_bytes.saturating_add(text.len());
+            if *text_bytes > MAX_SCRIPT_BYTES || text.contains('\0') {
+                return Err(ValidationError::at(
+                    location,
+                    "assertion text must contain no NUL and combined text must not exceed 4 MiB",
+                ));
+            }
+        }
+        ControlAssertion::Checked(_) if selector.role != ControlRole::CheckBox => {
+            return Err(ValidationError::at(
+                location,
+                "checked assertions require a check box",
+            ));
+        }
+        _ => {}
+    }
+
+    Ok(())
 }

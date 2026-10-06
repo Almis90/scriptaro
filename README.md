@@ -64,7 +64,9 @@ steps:
 ```
 
 Open TextEdit and prepare a blank document before playing this example.
-`activate_app` activates an **already running** app; it does not launch one.
+`activate_app` activates an **already running** app.
+Use [`launch_app`](docs/guide/launch-and-readiness.md) to start one by identifier
+or application path and wait for readiness.
 Use `scriptaro apps` to discover identifiers or PIDs. Ambiguous app selectors
 fail rather than selecting an arbitrary process.
 
@@ -212,7 +214,8 @@ untouched during playback. See the [trial setup and limits](docs/guide/developme
 - File-open completion confirms native dispatch and application focus. Use
   `wait_until`/`activate_window` for an expected window; its existence/focus does
   not prove document content is ready. Control readiness can check existence,
-  enabled state and focus; browser/server readiness remains future work.
+  enabled state, focus, exact text and checkbox state. These observe Accessibility
+  values; network/browser-specific readiness remains future work.
 - Window discovery uses exact titles exposed through Accessibility. Apps that
   do not expose the required attributes fail explicitly. Accessibility messages
   have one-second timeouts, with a two-second discovery budget and a 256-window limit.

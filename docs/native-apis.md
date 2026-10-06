@@ -64,3 +64,11 @@ Explicit assertions read [AXValue](https://developer.apple.com/documentation/app
 as a checked CFString or checkbox CFNumber/CFBoolean; unsupported types are errors.
 Secure fields remain excluded. These changes have simulated/fault-injection
 coverage and macOS build validation; no new live compatibility result is claimed.
+
+Application launching uses Apple's
+[NSWorkspace launch API](https://developer.apple.com/documentation/appkit/nsworkspace/openapplication(at:configuration:completionhandler:)),
+with existing-instance reuse, explicit activation mode and no substitution of a
+different installation. The callback returns an owned process ID; the engine
+polls finished-launching state and optional focus within one deadline. SDK
+headers confirm that some apps never expose finished-launching state. Value
+readiness reuses the explicit AX property readers through read-only polling.

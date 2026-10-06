@@ -82,7 +82,13 @@ pub struct Form {
 impl Kind {
     pub fn of(action: &Action) -> Self {
         match action {
-            Action::AssertControl { .. } | Action::MouseDrag { .. } => Self::Advanced,
+            Action::LaunchApp { .. }
+            | Action::WaitUntil {
+                condition: Condition::ControlMatches { .. },
+                ..
+            }
+            | Action::AssertControl { .. }
+            | Action::MouseDrag { .. } => Self::Advanced,
             Action::Wait { .. } => Self::Wait,
             Action::TypeText { .. } => Self::TypeText,
             Action::KeyPress { .. } => Self::KeyPress,
@@ -100,6 +106,7 @@ impl Kind {
 }
 pub fn condition_index(condition: &Condition) -> usize {
     match condition {
+        Condition::ControlMatches { .. } => 6,
         Condition::AppActive { .. } => 0,
         Condition::WindowExists { .. } => 1,
         Condition::WindowActive { .. } => 2,
@@ -266,7 +273,7 @@ impl Form {
             fields: vec![],
         };
         match action {
-            Action::AssertControl { .. } | Action::MouseDrag { .. } => {}
+            Action::LaunchApp { .. } | Action::AssertControl { .. } | Action::MouseDrag { .. } => {}
             Action::Wait { duration_ms } => form.text(
                 "duration",
                 "Duration (milliseconds)",
@@ -321,6 +328,7 @@ impl Form {
             } => {
                 form.condition = condition_index(condition);
                 match condition {
+                    Condition::ControlMatches { .. } => {}
                     Condition::AppActive { app } => form.app_fields(Some(app), false),
                     Condition::WindowExists { window } | Condition::WindowActive { window } => {
                         form.window_fields(window)

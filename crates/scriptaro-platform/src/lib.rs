@@ -4,8 +4,8 @@
 pub mod recording;
 
 use scriptaro_core::{
-    Action, AppSelector, Condition, ControlAssertion, ControlRole, ControlSelector, Key, Modifier,
-    MouseButton, Point, WindowSelector,
+    Action, AppSelector, Condition, ControlAssertion, ControlRole, ControlSelector, Key,
+    LaunchTarget, Modifier, MouseButton, Point, WindowSelector,
 };
 use std::{future::Future, path::Path, pin::Pin};
 use thiserror::Error;
@@ -13,6 +13,7 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
     Applications,
+    Launch,
     OpenFile,
     Keyboard,
     Pointer,
@@ -51,6 +52,8 @@ pub enum BackendError {
 pub type BackendResult<T> = Result<T, BackendError>;
 /// An OS open request may outlive this future. Dropping it stops waiting, not the OS.
 pub type PendingOpen = Pin<Box<dyn Future<Output = BackendResult<AppSelector>>>>;
+/// One dispatched launch request. Dropping it stops waiting, not an OS launch.
+pub type PendingLaunch = PendingOpen;
 
 #[derive(Debug, Clone)]
 pub struct PermissionStatus {
@@ -173,6 +176,15 @@ pub trait DesktopBackend {
     fn activate_app(&mut self, _app: &AppSelector) -> BackendResult<AppSelector> {
         Err(self.unsupported(Capability::Applications))
     }
+    /// Request launch once, reusing an existing instance where possible. Resolve to
+    /// the actual process identity; activation must obey the requested mode.
+    fn launch_app(&mut self, _app: &LaunchTarget, _activate: bool) -> BackendResult<PendingLaunch> {
+        Err(self.unsupported(Capability::Launch))
+    }
+    /// True only when the returned process is alive and has finished launching.
+    fn is_app_ready(&mut self, _app: &AppSelector) -> BackendResult<bool> {
+        Err(self.unsupported(Capability::Launch))
+    }
     fn is_app_active(&mut self, _app: &AppSelector) -> BackendResult<bool> {
         Err(self.unsupported(Capability::FocusQuery))
     }
@@ -211,6 +223,7 @@ pub trait DesktopBackend {
     /// remain errors. Observation must never send input or activate a target.
     fn observe(&mut self, condition: &Condition) -> BackendResult<bool> {
         match condition {
+            Condition::ControlMatches { control, expect } => self.assert_control(control, expect),
             Condition::AppActive { app } => self.is_app_active(app),
             _ => Err(self.unsupported(Capability::Windows)),
         }
@@ -267,7 +280,17 @@ pub fn required_capabilities(actions: &[Action]) -> Vec<Capability> {
     let mut required = Vec::new();
     for action in actions {
         let capabilities: &[Capability] = match action {
-            Action::AssertControl { .. } => &[
+            Action::LaunchApp { activate: true, .. } => {
+                &[Capability::Launch, Capability::FocusQuery]
+            }
+            Action::LaunchApp {
+                activate: false, ..
+            } => &[Capability::Launch],
+            Action::WaitUntil {
+                condition: Condition::ControlMatches { .. },
+                ..
+            }
+            | Action::AssertControl { .. } => &[
                 Capability::ControlAssertions,
                 Capability::Controls,
                 Capability::Windows,

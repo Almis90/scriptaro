@@ -1,8 +1,8 @@
 //! Bounded authoring compiler. It performs no filesystem, environment or desktop access.
 use super::ScriptError;
 use crate::{
-    Action, AppSelector, Condition, ControlAssertion, ControlSelector, Defaults, MAX_SCRIPT_BYTES,
-    Script, Section, ValidationError, WindowSelector,
+    Action, AppSelector, Condition, ControlAssertion, ControlSelector, Defaults, LaunchTarget,
+    MAX_SCRIPT_BYTES, Script, Section, ValidationError, WindowSelector,
 };
 use serde::Deserialize;
 use serde_yaml::Value;
@@ -261,6 +261,13 @@ impl Compiler<'_> {
     }
     fn condition(&mut self, condition: &mut Condition, at: &str) -> Result<(), ScriptError> {
         match condition {
+            Condition::ControlMatches { control, expect } => {
+                self.control(control, at)?;
+                if let ControlAssertion::Text(text) = expect {
+                    self.text(text, at)?;
+                }
+                Ok(())
+            }
             Condition::AppActive { app } => self.app(app, at),
             Condition::WindowExists { window } | Condition::WindowActive { window } => {
                 self.window(window, at)
@@ -272,6 +279,14 @@ impl Compiler<'_> {
     }
     fn action(&mut self, action: &mut Action, at: &str) -> Result<(), ScriptError> {
         match action {
+            Action::LaunchApp { app, .. } => match app {
+                LaunchTarget::Identifier(id) => self.text(id, at)?,
+                LaunchTarget::Path(path) => {
+                    let mut text = path.to_string_lossy().into_owned();
+                    self.text(&mut text, at)?;
+                    *path = text.into();
+                }
+            },
             Action::AssertControl { control, expect } => {
                 self.control(control, at)?;
                 if let ControlAssertion::Text(text) = expect {

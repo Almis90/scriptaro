@@ -33,6 +33,7 @@ pause immediately. Pausing does not undo an OS request already sent.
 | --- | --- | --- |
 | `wait` | `duration_ms` | — |
 | `wait_until` | `condition` | `timeout_ms` |
+| `launch_app` | `app` (identifier or path) | `activate` (`true`), `timeout_ms` |
 | `activate_app` | `app` | `timeout_ms` |
 | `activate_window` | `window` | `timeout_ms` |
 | `open_file` | `path` | `app`, `timeout_ms` |
@@ -60,6 +61,9 @@ macOS an installed bundle identifier can launch the handler as necessary; name
 and PID selectors must already refer to a running app. macOS opens a document in
 an application bundle and decides which instance handles it. The engine guards
 the actual returned process, even if a different instance was requested.
+
+Use [`launch_app`](/guide/launch-and-readiness) to start an installed application
+or a specific application bundle, then wait for its readiness.
 
 `activate_app` only activates a running app, then waits for it to become frontmost.
 Activation refusal, ambiguity, disappearance, and timeout are errors. No action
@@ -268,3 +272,7 @@ In this fallback, read-only text areas remain unavailable for `focus_control`. O
 must expose their enabled state explicitly. The per-message one-second timeout allows
 ordinary AppKit event handling beyond 250 ms; it is still bounded and dispatched
 actions are never retried.
+
+`wait_until` also accepts [`control_matches`](/guide/launch-and-readiness#wait-for-text-or-state)
+with a control selector and an assertion-style `expect` mapping. It polls for text
+or control state without changing focus or sending input.

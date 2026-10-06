@@ -62,6 +62,19 @@ pub enum AppSelector {
     Pid(u32),
 }
 
+/// A launchable application, independent of running process selectors.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "by",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum LaunchTarget {
+    Identifier(String),
+    Path(PathBuf),
+}
+
 /// An exact, case-sensitive window title within one application.
 /// Multiple matches are an error; backends must never choose an arbitrary window.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,18 +111,35 @@ pub struct ControlSelector {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Condition {
-    ControlExists { control: ControlSelector },
-    ControlEnabled { control: ControlSelector },
-    ControlFocused { control: ControlSelector },
-    AppActive { app: AppSelector },
-    WindowExists { window: WindowSelector },
-    WindowActive { window: WindowSelector },
+    ControlMatches {
+        control: ControlSelector,
+        expect: ControlAssertion,
+    },
+    ControlExists {
+        control: ControlSelector,
+    },
+    ControlEnabled {
+        control: ControlSelector,
+    },
+    ControlFocused {
+        control: ControlSelector,
+    },
+    AppActive {
+        app: AppSelector,
+    },
+    WindowExists {
+        window: WindowSelector,
+    },
+    WindowActive {
+        window: WindowSelector,
+    },
 }
 
 impl Condition {
     /// A content-free label suitable for progress and error messages.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::ControlMatches { .. } => "control_matches",
             Self::ControlExists { .. } => "control_exists",
             Self::ControlEnabled { .. } => "control_enabled",
             Self::ControlFocused { .. } => "control_focused",
@@ -158,6 +188,13 @@ impl ControlAssertion {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    LaunchApp {
+        app: LaunchTarget,
+        #[serde(default = "yes")]
+        activate: bool,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
     AssertControl {
         control: ControlSelector,
         expect: ControlAssertion,
@@ -235,6 +272,10 @@ pub enum Action {
     },
 }
 
+fn yes() -> bool {
+    true
+}
+
 fn one() -> u8 {
     1
 }
@@ -243,6 +284,7 @@ impl Action {
     /// Stable name for logs and events; deliberately excludes user content.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::LaunchApp { .. } => "launch_app",
             Self::AssertControl { .. } => "assert_control",
             Self::MouseDrag { .. } => "mouse_drag",
             Self::FocusControl { .. } => "focus_control",

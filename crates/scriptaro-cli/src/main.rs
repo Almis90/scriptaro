@@ -284,13 +284,24 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                             interval_ms.unwrap_or(script.defaults.character_delay_ms)
                         ),
                         Action::Wait { duration_ms } => format!("{duration_ms} ms"),
+                        Action::LaunchApp { app, activate, .. } => {
+                            format!("{app:?}; activate={activate}")
+                        }
                         Action::ActivateApp { app, .. } => format!("{app:?}"),
                         Action::ActivateWindow { window, .. } => {
                             format!("{:?}; title={:?}", window.app, window.title)
                         }
                         Action::FocusControl { control, .. }
                         | Action::InvokeControl { control, .. } => format!("{control:?}"),
-                        Action::WaitUntil { condition, .. } => format!("{condition:?}"),
+                        Action::WaitUntil { condition, .. } => match condition {
+                            scriptaro_core::Condition::ControlMatches { control, expect } => {
+                                format!(
+                                    "control_matches; {control:?}; property={}",
+                                    expect.property()
+                                )
+                            }
+                            _ => format!("{condition:?}"),
+                        },
                         Action::KeyPress { key, modifiers } => format!("{modifiers:?} + {key:?}"),
                         Action::OpenFile { path, app, .. } => {
                             format!("{}; app={app:?}", path.display())

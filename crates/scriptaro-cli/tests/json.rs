@@ -474,3 +474,43 @@ fn motion_and_assertions_have_redacted_plans_and_explicit_simulation_reports() {
     );
     assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
 }
+
+#[test]
+fn launch_and_value_wait_plans_redact_text_and_simulations_save_results() {
+    let scratch = Scratch::new();
+    let path=scratch.script("version: 2\nvariables: {expected: 'PRIVATE READY'}\nsteps:\n  - action: launch_app\n    app: {by: identifier, value: com.example.App}\n  - action: wait_until\n    condition:\n      kind: control_matches\n      control: {window: {app: {by: identifier, value: com.example.App}, title: Scratch}, role: text_field, identifier: field}\n      expect: {property: text, equals: '${expected}'}\n");
+    let output = cli().arg("plan").arg(&path).arg("--json").output().unwrap();
+    let value = json(&output, 0);
+    assert_eq!(value["data"]["steps"][0]["activate"], true);
+    assert_eq!(
+        value["data"]["steps"][1]["condition"]["expect"]["characters"],
+        13
+    );
+    assert_eq!(value["data"]["steps"][1]["timeout_ms"], 5000);
+    assert!(
+        value["data"]["required_capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("launch"))
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+    let human = cli().arg("plan").arg(&path).output().unwrap();
+    assert!(human.status.success());
+    assert!(!String::from_utf8_lossy(&human.stdout).contains("PRIVATE"));
+    let report = scratch.0.join("launch.json");
+    let output = cli()
+        .arg("run")
+        .arg(&path)
+        .args(["--dry-run", "--json", "--report"])
+        .arg(&report)
+        .output()
+        .unwrap();
+    let value = json(&output, 0);
+    assert_eq!(value["data"]["completed_steps"], 2);
+    assert_eq!(value["data"]["readiness_assumed"], true);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(report).unwrap()).unwrap(),
+        value
+    );
+}

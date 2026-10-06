@@ -35,3 +35,6 @@ currently supports version 1 only.
 - `assertions.yaml`: version 2 property assertions with selector/text variables.
 
 Simulations assume assertions pass; they cannot verify application state.
+
+- `launch-and-wait.yaml`: version 2 launch, text readiness and an assertion, with
+  replaceable application/window/field variables. Simulate before native playback.

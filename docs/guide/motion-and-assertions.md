@@ -108,7 +108,8 @@ and invalid-source diagnostics retain the privacy limits in
 Because native input is asynchronous, asserting immediately after typing can
 observe the old value. Add appropriate readiness checks or an explicit wait
 before the assertion. Assertions do not retry a failed effect or wait for text to
-change; text-based `wait_until` conditions remain future work.
+change. Use [`wait_until` with `control_matches`](/guide/launch-and-readiness#wait-for-text-or-state)
+to wait for the expected value before continuing.
 
 Version 2 variables work in assertion selectors and expected text. For example:
 
