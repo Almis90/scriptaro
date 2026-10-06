@@ -274,7 +274,10 @@ async fn window_retarget_clears_control_guard_but_readonly_wait_does_not() {
         let result = Engine::new(&mut backend, RunOptions::default())
             .run(&script(vec![
                 focus(),
-                Action::Wait { duration_ms: 40 },
+                Action::Wait {
+                    scale_with_speed: true,
+                    duration_ms: 40,
+                },
                 next,
                 text(),
             ]))

@@ -6,7 +6,7 @@ mod run;
 use clap::{Parser, Subcommand};
 use diagnostic::Diagnostic;
 use output::Outcome;
-use scriptaro_core::{AppSelector, MAX_SCRIPT_BYTES, Script, WindowSelector, yaml};
+use scriptaro_core::{AppSelector, MAX_SCRIPT_BYTES, WindowSelector, yaml};
 use scriptaro_engine::PlaybackController;
 use scriptaro_platform::{BackendResult, DesktopBackend, required_capabilities};
 use serde_json::{Value, json};
@@ -154,7 +154,10 @@ fn native_backend() -> BackendResult<Box<dyn DesktopBackend>> {
     }
 }
 
-fn load(path: &Path, variables: &VariableArgs) -> Result<(Script, PathBuf, u32), Diagnostic> {
+fn load(
+    path: &Path,
+    variables: &VariableArgs,
+) -> Result<(yaml::CompiledScript, PathBuf), Diagnostic> {
     let overrides = variables.resolve().map_err(|e| e.at(path))?;
     let absolute = path
         .canonicalize()
@@ -170,7 +173,7 @@ fn load(path: &Path, variables: &VariableArgs) -> Result<(Script, PathBuf, u32),
         .parent()
         .expect("canonical file has a parent")
         .to_path_buf();
-    Ok((compiled.script, directory, compiled.source_version))
+    Ok((compiled, directory))
 }
 
 /// Register signals before playback so failed registration cannot leave an uncontrolled run.
@@ -260,8 +263,11 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
             section,
             retake,
         } => {
-            let (source, _, source_version) = load(&path, &variables)?;
-            let script = source
+            let (compiled, _) = load(&path, &variables)?;
+            let source_version = compiled.source_version;
+            let input_boundaries = compiled.input_boundaries;
+            let script = compiled
+                .script
                 .prepare(section.as_deref(), retake)
                 .map_err(|e| Diagnostic::from(e).at(&path))?;
             if !json_output {
@@ -307,7 +313,17 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                                 timing.seed
                             )
                         }
-                        Action::Wait { duration_ms } => format!("{duration_ms} ms"),
+                        Action::Wait {
+                            duration_ms,
+                            scale_with_speed,
+                        } => format!(
+                            "{duration_ms} ms; {}",
+                            if *scale_with_speed {
+                                "presentation; scales with speed"
+                            } else {
+                                "technical; unscaled; not a delivery acknowledgement"
+                            }
+                        ),
                         Action::LaunchApp { app, activate, .. } => {
                             format!("{app:?}; activate={activate}")
                         }
@@ -356,13 +372,21 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                     "No actions executed. Review selectors, reset effects, and waits before desktop playback."
                 );
             }
-            json!({"source_version":source_version,"script":path.to_string_lossy(),"name":script.name,"section":section,"retake":retake,"defaults":script.defaults,"total_steps":script.steps.len(),"steps":output::plan(&script),"required_capabilities":required_capabilities(&script.steps).iter().map(output::capability).collect::<Vec<_>>(),"effects_executed":false})
+            if !json_output {
+                output::boundaries(input_boundaries.as_ref());
+            }
+            json!({"source_version":source_version,"input_boundaries":input_boundaries,"script":path.to_string_lossy(),"name":script.name,"section":section,"retake":retake,"defaults":script.defaults,"total_steps":script.steps.len(),"steps":output::plan(&script),"required_capabilities":required_capabilities(&script.steps).iter().map(output::capability).collect::<Vec<_>>(),"effects_executed":false})
         }
         Command::Validate {
             script: path,
             variables,
         } => {
-            let (script, _, source_version) = load(&path, &variables)?;
+            let (compiled, _) = load(&path, &variables)?;
+            let (script, source_version, input_boundaries) = (
+                compiled.script,
+                compiled.source_version,
+                compiled.input_boundaries,
+            );
             let total_steps = script.prepare(None, false)?.steps.len();
             if !json_output {
                 crate::output::line!(
@@ -371,13 +395,21 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                     total_steps
                 );
             }
-            json!({"source_version":source_version,"script":path.to_string_lossy(),"version":script.version,"name":script.name,"total_steps":total_steps,"valid":true})
+            if !json_output {
+                output::boundaries(input_boundaries.as_ref());
+            }
+            json!({"source_version":source_version,"input_boundaries":input_boundaries,"script":path.to_string_lossy(),"version":script.version,"name":script.name,"total_steps":total_steps,"valid":true})
         }
         Command::Sections {
             script: path,
             variables,
         } => {
-            let (script, _, source_version) = load(&path, &variables)?;
+            let (compiled, _) = load(&path, &variables)?;
+            let (script, source_version, input_boundaries) = (
+                compiled.script,
+                compiled.source_version,
+                compiled.input_boundaries,
+            );
             if !json_output {
                 for section in &script.sections {
                     crate::output::line!(
@@ -388,7 +420,10 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                     );
                 }
             }
-            json!({"source_version":source_version,"script":path.to_string_lossy(),"sections":script.sections.iter().map(|s| json!({"name":s.name,"steps":s.steps.len(),"setup_steps":s.setup.len(),"readiness_conditions":s.requires.len(),"has_reset":s.reset.is_some(),"reset_steps":s.reset.as_ref().map(Vec::len)})).collect::<Vec<_>>()})
+            if !json_output {
+                output::boundaries(input_boundaries.as_ref());
+            }
+            json!({"source_version":source_version,"input_boundaries":input_boundaries,"script":path.to_string_lossy(),"sections":script.sections.iter().map(|s| json!({"name":s.name,"steps":s.steps.len(),"setup_steps":s.setup.len(),"readiness_conditions":s.requires.len(),"has_reset":s.reset.is_some(),"reset_steps":s.reset.as_ref().map(Vec::len)})).collect::<Vec<_>>()})
         }
         Command::Controls { target, window } => {
             let mut backend = native_backend()?;

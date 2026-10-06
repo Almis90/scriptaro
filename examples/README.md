@@ -51,3 +51,6 @@ Simulations assume assertions pass; they cannot verify application state.
 - `sequence-parameters.yaml`: required/default string parameters, different values
   per call and explicit forwarding through nested sequences. Uses a global topic,
   typing profiles and a named take. [Parameter rules](../docs/guide/reuse.md#sequence-parameters).
+- `input-boundaries.yaml`: strict input declarations, value postconditions before
+  changing fields, an explicit unverified waiver and a technical unscaled wait.
+  Replace selectors and prepare scratch fields before native playback.

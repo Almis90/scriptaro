@@ -806,7 +806,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             list,
             scriptaro_desktop::builder::Edit::Insert {
                 index: 0,
-                actions: vec![scriptaro_core::Action::Wait { duration_ms: 123 }],
+                actions: vec![scriptaro_core::Action::Wait {
+                    scale_with_speed: true,
+                    duration_ms: 123,
+                }],
             },
         )?;
         let edited = builder.finish()?;

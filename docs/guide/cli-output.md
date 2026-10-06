@@ -100,6 +100,9 @@ same envelope as JSON stdout, formatted for reading. Its `data` records:
 
 - Requested script, source version (once compiled), section and retake selection.
 - `mode` (`simulation` or `desktop`), backend, speed and countdown.
+- `input_boundaries`: version 2 authoring policy and counts for the entire source
+  (postconditions, explicit waivers, undeclared inputs); null for version 1.
+  These are declarations, not observed-delivery counts. See [input boundaries](/guide/input-boundaries).
 - `readiness_assumed`, `assertions_assumed` and `timing_preserved`. Ordinary simulation skips delays;
   `--realtime` preserves them. Simulation always assumes readiness.
 - `status`, `total_steps`, `completed_steps` and `failed_step`.

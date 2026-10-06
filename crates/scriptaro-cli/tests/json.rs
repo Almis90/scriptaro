@@ -50,6 +50,88 @@ fn json(output: &Output, code: i32) -> Value {
 const SCRIPT: &str = "version: 1\ndefaults: {character_delay_ms: 17, timeout_ms: 3456}\nsteps:\n  - action: type_text\n    text: 'PRIVATE 🦀 text'\n  - action: wait\n    duration_ms: 2\n";
 
 #[test]
+fn input_postconditions_are_planned_redacted_and_rejected_before_native_playback_when_missing() {
+    let root = Scratch::new();
+    let source = r#"
+version: 2
+input_boundaries: strict
+steps:
+  - action: type_text
+    text: 'PRIVATE 🦀'
+    after:
+      condition:
+        kind: control_matches
+        control: {window: {app: {by: name, value: Demo}, title: Scratch}, role: text_field, identifier: field}
+        expect: {property: text, equals: 'PRIVATE 🦀'}
+  - {action: wait, duration_ms: 200, scale_with_speed: false}
+  - {action: key_press, key: enter, unverified: true}
+"#;
+    let path = root.script(source);
+    for command in ["validate", "plan", "sections"] {
+        let output = cli()
+            .arg(command)
+            .arg(&path)
+            .arg("--json")
+            .output()
+            .unwrap();
+        let value = json(&output, 0);
+        let summary = &value["data"]["input_boundaries"];
+        assert_eq!(summary["policy"], "strict");
+        assert_eq!(summary["postconditions"], 1);
+        assert_eq!(summary["explicit_waivers"], 1);
+        assert_eq!(summary["undeclared_inputs"], 0);
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+        if command == "plan" {
+            assert_eq!(value["data"]["total_steps"], 4);
+            assert_eq!(
+                value["data"]["steps"][1]["condition"]["expect"]["characters"],
+                9
+            );
+            assert_eq!(value["data"]["steps"][1]["timeout_ms"], 5000);
+            assert_eq!(value["data"]["steps"][2]["scale_with_speed"], false);
+        }
+    }
+    let plan = cli().arg("plan").arg(&path).output().unwrap();
+    assert!(plan.status.success());
+    assert!(!String::from_utf8_lossy(&plan.stdout).contains("PRIVATE"));
+    assert!(String::from_utf8_lossy(&plan.stdout).contains("technical; unscaled"));
+    let report = root.0.join("boundary-report.json");
+    let result = cli()
+        .arg("run")
+        .arg(&path)
+        .args(["--dry-run", "--json", "--speed", "5", "--report"])
+        .arg(&report)
+        .output()
+        .unwrap();
+    let value = json(&result, 0);
+    assert_eq!(value["data"]["completed_steps"], 4);
+    assert_eq!(value["data"]["readiness_assumed"], true);
+    assert_eq!(value["data"]["input_boundaries"]["postconditions"], 1);
+    assert!(!String::from_utf8_lossy(&result.stdout).contains("PRIVATE"));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&report).unwrap()).unwrap(),
+        value
+    );
+    root.script(&source.replace(", unverified: true", ""));
+    let failed = root.0.join("strict-failure.json");
+    let output = cli()
+        .arg("run")
+        .arg(&path)
+        .args(["--json", "--report"])
+        .arg(&failed)
+        .output()
+        .unwrap();
+    let value = json(&output, 1);
+    assert_eq!(value["error"]["code"], "invalid_script");
+    assert!(value["data"]["backend"].is_null());
+    assert_eq!(value["data"]["completed_steps"], 0);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&failed).unwrap()).unwrap(),
+        value
+    );
+}
+
+#[test]
 fn typing_profile_plans_resolve_precedence_without_disclosing_text() {
     let root = Scratch::new();
     let path=root.script("version: 1\ndefaults: {character_delay_ms: 99, typing_profile: natural}\nsteps:\n - action: type_text\n   text: 'PRIVATE 🦀'\n - action: type_text\n   text: fixed\n   interval_ms: 0\n - action: type_text\n   text: custom\n   profile: {interval_ms: 60, jitter_ms: 10, line_pause_ms: 200, seed: 42}\n");

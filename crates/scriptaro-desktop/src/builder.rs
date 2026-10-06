@@ -176,7 +176,10 @@ impl Builder {
             setup: vec![],
             requires: vec![],
             reset: None,
-            steps: vec![Action::Wait { duration_ms: 1000 }],
+            steps: vec![Action::Wait {
+                scale_with_speed: true,
+                duration_ms: 1000,
+            }],
         });
         Ok(())
     }
@@ -199,7 +202,17 @@ pub fn summary(action: &Action) -> String {
         Action::LaunchApp { .. } => "Launch application".into(),
         Action::AssertControl { expect, .. } => format!("Assert control {}", expect.property()),
         Action::MouseDrag { duration_ms, .. } => format!("Drag pointer ({duration_ms} ms)"),
-        Action::Wait { duration_ms } => format!("Wait {duration_ms} ms"),
+        Action::Wait {
+            duration_ms,
+            scale_with_speed,
+        } => format!(
+            "Wait {duration_ms} ms ({})",
+            if *scale_with_speed {
+                "presentation"
+            } else {
+                "technical; unscaled"
+            }
+        ),
         Action::TypeText { text, .. } => format!("Type text ({} characters)", text.chars().count()),
         Action::KeyPress { key, modifiers } => format!("Press {modifiers:?} + {key:?}"),
         Action::MouseMove { x, y, .. } => format!("Move pointer to {x}, {y}"),

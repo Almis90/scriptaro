@@ -1,5 +1,7 @@
 //! Bounded authoring compiler. It performs no filesystem, environment or desktop access.
-use super::ScriptError;
+use super::{
+    InputBoundaryPolicy, InputBoundarySummary, ScriptError, input_boundaries::Annotations,
+};
 use crate::{
     Action, AppSelector, Condition, ControlAssertion, ControlSelector, Defaults, LaunchTarget,
     MAX_SCRIPT_BYTES, Script, Section, ValidationError, WindowSelector,
@@ -13,12 +15,15 @@ use std::collections::BTreeMap;
 pub struct CompiledScript {
     pub script: Script,
     pub source_version: u32,
+    pub input_boundaries: Option<InputBoundarySummary>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Source {
     version: u32,
+    #[serde(default)]
+    input_boundaries: InputBoundaryPolicy,
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
@@ -127,6 +132,7 @@ pub fn compile(
         return Ok(CompiledScript {
             script,
             source_version: 1,
+            input_boundaries: None,
         });
     }
     let source: Source = serde_yaml::from_value(value)?;
@@ -172,6 +178,10 @@ pub fn compile(
     }
     let mut compiler = Compiler {
         variables,
+        boundaries: InputBoundarySummary {
+            policy: source.input_boundaries,
+            ..Default::default()
+        },
         locals: BTreeMap::new(),
         sequences: &source.sequences,
         defaults: &source.defaults,
@@ -231,6 +241,11 @@ pub fn compile(
         )?;
     }
     compiler.locals.clear();
+    // Definition checks enforce the policy but are not runtime declarations.
+    compiler.boundaries = InputBoundarySummary {
+        policy: source.input_boundaries,
+        ..Default::default()
+    };
     let steps = compiler.expand(&source.steps, "steps", &mut vec![])?;
     let mut sections = Vec::new();
     for (index, section) in source.sections.iter().enumerate() {
@@ -265,6 +280,7 @@ pub fn compile(
     Ok(CompiledScript {
         script,
         source_version: source.version,
+        input_boundaries: Some(compiler.boundaries),
     })
 }
 
@@ -275,6 +291,7 @@ struct Binding {
 
 struct Compiler<'a> {
     variables: BTreeMap<String, String>,
+    boundaries: InputBoundarySummary,
     // Unresolved bindings exist only during definition checks, never in playback.
     locals: BTreeMap<String, Binding>,
     sequences: &'a BTreeMap<String, Sequence>,
@@ -283,6 +300,16 @@ struct Compiler<'a> {
     bytes: usize,
 }
 impl Compiler<'_> {
+    fn visit(&mut self, location: &str) -> Result<(), ScriptError> {
+        self.actions += 1;
+        if self.actions > 10_000 {
+            return Err(invalid(
+                location,
+                "expansion exceeds the 10000-step compilation budget (including calls, postconditions and definition checks)",
+            ));
+        }
+        Ok(())
+    }
     fn text(&mut self, text: &mut String, location: &str) -> Result<(), ScriptError> {
         self.resolve_text(text, location).map(|_| ())
     }
@@ -450,13 +477,7 @@ impl Compiler<'_> {
         let mut result = Vec::new();
         for (index, value) in steps.iter().enumerate() {
             let location = format!("{at}[{}]", index + 1);
-            self.actions += 1;
-            if self.actions > 10_000 {
-                return Err(invalid(
-                    &location,
-                    "expansion exceeds the 10000-step compilation budget (including calls and definition checks)",
-                ));
-            }
+            self.visit(&location)?;
             if value.get("action").and_then(Value::as_str) == Some("call") {
                 let call: Call = serde_yaml::from_value(value.clone())
                     .map_err(|e| invalid(&location, e.to_string()))?;
@@ -518,10 +539,28 @@ impl Compiler<'_> {
                 self.locals = previous;
                 result.extend(expanded?);
             } else {
-                let mut action: Action = serde_yaml::from_value(value.clone())
-                    .map_err(|e| invalid(&location, e.to_string()))?;
+                let mut value = value.clone();
+                let annotations = Annotations::take(&mut value, &location)?;
+                let mut action: Action =
+                    serde_yaml::from_value(value).map_err(|e| invalid(&location, e.to_string()))?;
+                let input = annotations.check(&action, self.boundaries.policy, &location)?;
                 self.action(&mut action, &location)?;
                 result.push(action);
+                if let Some(after) = annotations.after {
+                    let after_location = format!("{location}.after");
+                    self.visit(&after_location)?;
+                    let mut wait = Action::WaitUntil {
+                        condition: after.condition,
+                        timeout_ms: after.timeout_ms,
+                    };
+                    self.action(&mut wait, &after_location)?;
+                    result.push(wait);
+                    self.boundaries.postconditions += 1;
+                } else if annotations.unverified {
+                    self.boundaries.explicit_waivers += 1;
+                } else if input {
+                    self.boundaries.undeclared_inputs += 1;
+                }
             }
         }
         Ok(result)

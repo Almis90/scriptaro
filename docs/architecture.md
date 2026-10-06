@@ -27,6 +27,12 @@ calls must bind them and pass ordinary action validation. String and action
 budgets include definition checks and argument expansion. The engine and native
 backends receive the same flat version 1 actions as before.
 
+Version 2 input postconditions compile into existing `wait_until` actions directly
+after their input. Strict declaration policy is checked during compilation, including
+unused definitions, and permits explicit unverified waivers. Runtime preflight
+therefore includes postcondition capabilities before any effects. Technical waits
+carry an explicit speed-scaling flag in the core model; timing remains engine policy.
+
 ## Playback
 
 `Engine` borrows a `dyn DesktopBackend` and consumes itself per run. A cloned

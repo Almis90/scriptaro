@@ -49,7 +49,10 @@ async fn generic_sequence_preserves_order_unicode_and_relative_paths() {
             timeout_ms: None,
         },
         text("A🦀é\n", 0),
-        Action::Wait { duration_ms: 50 },
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 50,
+        },
         Action::KeyPress {
             key: Key::S,
             modifiers: vec![Modifier::Primary],
@@ -111,7 +114,10 @@ async fn speed_scales_waits_and_inter_character_delays_without_trailing_delay() 
     )
     .run(&script(vec![
         text("abc", 100),
-        Action::Wait { duration_ms: 1000 },
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 1000,
+        },
     ]))
     .await
     .unwrap();
@@ -144,6 +150,7 @@ async fn cancel_interrupts_long_wait_and_initial_countdown() {
         let mut backend = RecordingBackend::default();
         let sequence = script(vec![
             Action::Wait {
+                scale_with_speed: true,
                 duration_ms: 300_000,
             },
             text("never", 0),
@@ -170,7 +177,13 @@ async fn cancel_interrupts_long_wait_and_initial_countdown() {
 #[tokio::test(start_paused = true)]
 async fn pause_preserves_remaining_wait_instead_of_finishing_in_background() {
     let mut backend = RecordingBackend::default();
-    let sequence = script(vec![Action::Wait { duration_ms: 1000 }, text("x", 0)]);
+    let sequence = script(vec![
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 1000,
+        },
+        text("x", 0),
+    ]);
     let engine = Engine::new(&mut backend, RunOptions::default());
     let controller = engine.controller();
     let start = Instant::now();
@@ -218,7 +231,13 @@ async fn emergency_stop_prevents_input() {
 #[tokio::test(start_paused = true)]
 async fn unsupported_actions_fail_preflight_even_after_supported_actions() {
     let mut backend = UnsupportedBackend("test");
-    let sequence = script(vec![Action::Wait { duration_ms: 5000 }, text("never", 0)]);
+    let sequence = script(vec![
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 5000,
+        },
+        text("never", 0),
+    ]);
     let engine = Engine::new(&mut backend, RunOptions::default());
     let mut events = engine.subscribe();
     let start = Instant::now();

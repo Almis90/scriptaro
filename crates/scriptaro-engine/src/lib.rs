@@ -37,7 +37,7 @@ fn bounds_match(actual: Bounds, expected: Bounds) -> bool {
 pub struct RunOptions {
     /// Relative script paths resolve against this directory, never the process CWD.
     pub base_dir: PathBuf,
-    /// Scales typing intervals, pointer motion and explicit waits, not native readiness timeouts.
+    /// Scales typing, pointer motion and presentation waits, not technical waits or native timeouts.
     pub speed: f64,
     /// Only permitted for a simulated backend.
     pub skip_delays: bool,
@@ -753,7 +753,17 @@ impl<'a> Engine<'a> {
                 )
                 .await?;
             }
-            Action::Wait { duration_ms } => self.delay(self.scaled(*duration_ms)).await?,
+            Action::Wait {
+                duration_ms,
+                scale_with_speed,
+            } => {
+                let duration = if *scale_with_speed {
+                    self.scaled(*duration_ms)
+                } else {
+                    Duration::from_millis(*duration_ms)
+                };
+                self.delay(duration).await?;
+            }
             Action::WaitUntil {
                 condition,
                 timeout_ms,

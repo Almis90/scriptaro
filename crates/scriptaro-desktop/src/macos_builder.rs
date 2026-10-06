@@ -439,7 +439,10 @@ pub fn build(mtm: MainThreadMarker, source: &str) -> Result<Option<String>, Box<
 pub(super) fn smoke(mtm: MainThreadMarker) -> Result<(), Box<dyn Error>> {
     let app = scriptaro_core::AppSelector::Name("Scratch app".into());
     let fixtures = [
-        Action::Wait { duration_ms: 250 },
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 250,
+        },
         Action::TypeText {
             profile: None,
             text: "Quotes: \"hello\" 🦀\nnext\tline".into(),

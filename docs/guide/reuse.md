@@ -61,6 +61,11 @@ Typing profiles work inside sequences. Each expanded `type_text` restarts its
 profile seed, so repeated calls keep the same planned gaps for the same text.
 Profiles and their numeric settings are literal configuration, not variable substitutions.
 
+Input actions can also declare an [`after` postcondition](/guide/input-boundaries).
+Its selectors and expected text use the same variable/parameter scope as the
+input action. `input_boundaries: strict` requires each input to declare a
+postcondition or an explicit unverified waiver, including inside sequences.
+
 Timing, coordinates, enum fields, section names and sequence names stay literal.
 Variables are strings; they do not become action names, numbers or YAML nodes.
 The compiler does not read environment variables, execute expressions, expand

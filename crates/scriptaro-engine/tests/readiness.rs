@@ -220,7 +220,10 @@ async fn waits_do_not_replace_an_existing_window_guard() {
     let result = Engine::new(&mut backend, RunOptions::default())
         .run(&script(vec![
             activate(1000),
-            Action::Wait { duration_ms: 100 },
+            Action::Wait {
+                scale_with_speed: true,
+                duration_ms: 100,
+            },
             wait(1000),
             text(),
         ]))
@@ -245,7 +248,10 @@ async fn explicit_app_activation_clears_previous_window_guard() {
     let result = Engine::new(&mut backend, RunOptions::default())
         .run(&script(vec![
             activate(1000),
-            Action::Wait { duration_ms: 100 },
+            Action::Wait {
+                scale_with_speed: true,
+                duration_ms: 100,
+            },
             Action::ActivateApp {
                 app: app(),
                 timeout_ms: None,

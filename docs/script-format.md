@@ -21,7 +21,8 @@ defaults:
 
 Durations are integer milliseconds, at most one day per value. Typing intervals
 and waits may be zero; native timeouts must be positive. `--speed` accepts finite
-values from 0.01 to 100 and scales explicit waits, typing gaps, and pointer motion.
+values from 0.01 to 100 and scales presentation waits, typing gaps, and pointer motion.
+Set `wait.scale_with_speed: false` for an unscaled technical interval.
 Characters have a delay **between** them, with no trailing delay.
 
 Optional `defaults.typing_profile` selects `steady`, `natural`, `brisk`, or a custom
@@ -38,7 +39,7 @@ pause immediately. Pausing does not undo an OS request already sent.
 
 | Action | Required fields | Optional fields |
 | --- | --- | --- |
-| `wait` | `duration_ms` | — |
+| `wait` | `duration_ms` | `scale_with_speed` (true by default) |
 | `wait_until` | `condition` | `timeout_ms` |
 | `launch_app` | `app` (identifier or path) | `activate` (`true`), `timeout_ms` |
 | `set_window_bounds` | `window`, `bounds` (`x`, `y`, `width`, `height`) | `timeout_ms` |
@@ -239,11 +240,12 @@ On macOS, identifiers map to `AXIdentifier`. A label is a nonempty `AXTitle`, fa
 Traversal is limited to 2,048 elements, 64 levels and a two-second query budget, with one-second native messaging timeouts. Crossing a limit fails rather than returning a potentially ambiguous partial match. The query budget is checked between elements; an element’s remaining native calls can exceed it. Cancellation is observed after synchronous backend queries return; checks and event posting cannot be atomic against changes in another application.
 
 Native keystrokes are queued asynchronously. Before moving focus to another
-control or pressing a button through Accessibility, add an explicit `wait`
-after typing or clearing a field. The local Chrome trial uses 200 ms at these
-boundaries. This is a tested pacing choice, not a delivery acknowledgement or a
-guarantee for arbitrary applications. `type_text` adds no delay after its last
-character, and control readiness does not verify field contents.
+control or invoking a button, prefer a `control_matches` value check after typing
+or clearing a field. Version 2 can attach this as an [`after` postcondition](/guide/input-boundaries),
+with optional strict declarations. A fallback settling `wait` can use
+`scale_with_speed: false`; it is not a delivery acknowledgement. The historical
+Chrome trial's 200 ms interval is not a guarantee for arbitrary apps.
+`type_text` adds no trailing delay, and focus readiness alone does not verify contents.
 
 ## Named sections and retakes
 

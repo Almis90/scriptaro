@@ -223,8 +223,14 @@ fn replacing_selected_actions_preserves_the_following_lines_indentation() {
         assert_eq!(
             parsed.steps,
             vec![
-                Action::Wait { duration_ms: 3 },
-                Action::Wait { duration_ms: 2 }
+                Action::Wait {
+                    scale_with_speed: true,
+                    duration_ms: 3
+                },
+                Action::Wait {
+                    scale_with_speed: true,
+                    duration_ms: 2
+                }
             ]
         );
     }

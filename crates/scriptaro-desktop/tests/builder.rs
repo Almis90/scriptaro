@@ -20,7 +20,10 @@ fn fixtures() -> Vec<Action> {
         label: Some("Exact label".into()),
     };
     let mut actions = vec![
-        Action::Wait { duration_ms: 123 },
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 123,
+        },
         Action::TypeText {
             profile: None,
             text: "🦀 \"hello\"\n  second\tline\n".into(),
@@ -90,6 +93,21 @@ fn fixtures() -> Vec<Action> {
         });
     }
     actions
+}
+
+#[test]
+fn technical_waits_remain_advanced_so_forms_cannot_discard_timing_policy() {
+    let script = yaml::from_str(
+        "version: 1\nsteps: [{action: wait, duration_ms: 200, scale_with_speed: false}]",
+    )
+    .unwrap();
+    let form = Form::from_action(&script.steps[0]);
+    assert_eq!(form.kind, Kind::Advanced);
+    assert!(form.action().is_err());
+    assert_eq!(
+        script,
+        yaml::from_str(&yaml::to_string(&script).unwrap()).unwrap()
+    );
 }
 fn set(form: &mut Form, key: &str, value: &str) {
     form.fields.iter_mut().find(|f| f.key == key).unwrap().value = value.into();
@@ -193,7 +211,10 @@ fn action_operations_are_ordered_and_failed_edits_are_atomic() {
             ActionList::Steps,
             Edit::Insert {
                 index: 1,
-                actions: vec![Action::Wait { duration_ms: 3 }],
+                actions: vec![Action::Wait {
+                    scale_with_speed: true,
+                    duration_ms: 3,
+                }],
             },
         )
         .unwrap();
@@ -205,7 +226,10 @@ fn action_operations_are_ordered_and_failed_edits_are_atomic() {
             ActionList::Steps,
             Edit::Replace {
                 index: 1,
-                action: Action::Wait { duration_ms: 4 },
+                action: Action::Wait {
+                    scale_with_speed: true,
+                    duration_ms: 4,
+                },
             },
         )
         .unwrap();
@@ -213,8 +237,14 @@ fn action_operations_are_ordered_and_failed_edits_are_atomic() {
     assert_eq!(
         builder.actions(ActionList::Steps).unwrap(),
         vec![
-            Action::Wait { duration_ms: 2 },
-            Action::Wait { duration_ms: 4 }
+            Action::Wait {
+                scale_with_speed: true,
+                duration_ms: 2
+            },
+            Action::Wait {
+                scale_with_speed: true,
+                duration_ms: 4
+            }
         ]
     );
     let before = builder.finish().unwrap();
@@ -248,7 +278,10 @@ fn empty_drafts_can_be_rebuilt_but_cannot_be_applied() {
             ActionList::Steps,
             Edit::Insert {
                 index: 0,
-                actions: vec![Action::Wait { duration_ms: 5 }],
+                actions: vec![Action::Wait {
+                    scale_with_speed: true,
+                    duration_ms: 5,
+                }],
             },
         )
         .unwrap();
@@ -270,7 +303,10 @@ fn takes_preserve_original_steps_and_readiness_and_reset_have_distinct_semantics
                 ActionList::Readiness(1),
                 Edit::Insert {
                     index: 0,
-                    actions: vec![Action::Wait { duration_ms: 1 }]
+                    actions: vec![Action::Wait {
+                        scale_with_speed: true,
+                        duration_ms: 1
+                    }]
                 }
             )
             .is_err()
@@ -310,14 +346,23 @@ fn takes_preserve_original_steps_and_readiness_and_reset_have_distinct_semantics
             ActionList::Reset(1),
             Edit::Insert {
                 index: 0,
-                actions: vec![Action::Wait { duration_ms: 9 }],
+                actions: vec![Action::Wait {
+                    scale_with_speed: true,
+                    duration_ms: 9,
+                }],
             },
         )
         .unwrap();
     let script = yaml::from_str(&builder.finish().unwrap()).unwrap();
     assert_eq!(script.sections[1].requires, vec![condition]);
     let retake = script.prepare(Some("New take"), true).unwrap();
-    assert!(matches!(retake.steps[0], Action::Wait { duration_ms: 9 }));
+    assert!(matches!(
+        retake.steps[0],
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 9
+        }
+    ));
     assert!(matches!(retake.steps[1], Action::WaitUntil { .. }));
 }
 #[test]

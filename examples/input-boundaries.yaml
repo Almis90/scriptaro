@@ -1,0 +1,54 @@
+version: 2
+name: Verify two fields before changing focus
+input_boundaries: strict
+variables:
+  application: 'Demo App'
+  title: 'Scratch form'
+  first: 'Hello from Scriptaro'
+  second: 'A separately verified field'
+steps:
+  # Replace these selectors using CLI discovery and prepare empty scratch fields.
+  - action: activate_window
+    window: &window
+      app: {by: name, value: '${application}'}
+      title: '${title}'
+  - action: wait_until
+    condition:
+      kind: control_matches
+      control: &first_field
+        window: *window
+        role: text_field
+        identifier: first
+      expect: {property: text, equals: ''}
+  - action: focus_control
+    control: *first_field
+  - action: type_text
+    text: '${first}'
+    after:
+      condition:
+        kind: control_matches
+        control: *first_field
+        expect: {property: text, equals: '${first}'}
+      timeout_ms: 3000
+  # This focus change is gated by the first field's observed value.
+  - action: focus_control
+    control: &second_field
+      window: *window
+      role: text_field
+      identifier: second
+  - action: paste_text
+    text: '${second}'
+    after:
+      condition:
+        kind: control_matches
+        control: *second_field
+        expect: {property: text, equals: '${second}'}
+  - action: wait
+    duration_ms: 500
+  - action: key_press
+    key: escape
+    # This fixture makes no claim about Escape's resulting application state.
+    unverified: true
+  - action: wait
+    duration_ms: 200
+    scale_with_speed: false

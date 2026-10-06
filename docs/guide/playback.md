@@ -17,15 +17,15 @@ An action can override it with `interval_ms`. Optional
 There is no delay after the final character, including punctuation and newlines.
 Use `wait` for an intentional pause between actions.
 
-Keystroke posting is asynchronous. Add a wait after typing or clearing a field
-before an Accessibility focus or invoke action, which can otherwise overtake
-queued input. The real Chrome form trial uses 200 ms at these boundaries and
-checks the submitted values. A wait reduces the race but does not acknowledge
-delivery; validate results in the target app. Increasing `--speed` also shortens
-these waits.
+Keystroke posting is asynchronous. Prefer a value-readiness check after typing
+or clearing a field, before changing focus or invoking another control. Version 2
+[`after` postconditions](/guide/input-boundaries) attach that check directly to
+input. A technical settling wait can use `scale_with_speed: false`, but elapsed
+time does not prove delivery. The historical Chrome form trial's 200 ms pacing
+choice is not a guarantee for other applications.
 
-`--speed 2` doubles the speed of typing, scripted waits and pointer motion. Native operation
-timeouts and the initial countdown do not scale. Pause preserves the remaining
+`--speed 2` doubles the speed of typing, presentation waits and pointer motion. Technical
+waits, native operation timeouts and the initial countdown do not scale. Pause preserves the remaining
 typing/wait delay. Native readiness timeouts use wall time, including pauses;
 an expired timeout is reported when playback resumes.
 

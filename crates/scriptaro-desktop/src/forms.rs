@@ -82,7 +82,11 @@ pub struct Form {
 impl Kind {
     pub fn of(action: &Action) -> Self {
         match action {
-            Action::TypeText {
+            Action::Wait {
+                scale_with_speed: false,
+                ..
+            }
+            | Action::TypeText {
                 profile: Some(_), ..
             }
             | Action::PasteText { .. }
@@ -149,7 +153,10 @@ impl Form {
                     fields: vec![],
                 };
             }
-            Kind::Wait => Action::Wait { duration_ms: 1000 },
+            Kind::Wait => Action::Wait {
+                scale_with_speed: true,
+                duration_ms: 1000,
+            },
             Kind::TypeText => Action::TypeText {
                 profile: None,
                 text: String::new(),
@@ -280,7 +287,11 @@ impl Form {
             fields: vec![],
         };
         match action {
-            Action::TypeText {
+            Action::Wait {
+                scale_with_speed: false,
+                ..
+            }
+            | Action::TypeText {
                 profile: Some(_), ..
             }
             | Action::PasteText { .. }
@@ -289,7 +300,10 @@ impl Form {
             | Action::LaunchApp { .. }
             | Action::AssertControl { .. }
             | Action::MouseDrag { .. } => {}
-            Action::Wait { duration_ms } => form.text(
+            Action::Wait {
+                duration_ms,
+                scale_with_speed: true,
+            } => form.text(
                 "duration",
                 "Duration (milliseconds)",
                 duration_ms.to_string(),
@@ -476,6 +490,7 @@ impl Form {
                 ));
             }
             Kind::Wait => Action::Wait {
+                scale_with_speed: true,
                 duration_ms: self.number("duration")?,
             },
             Kind::TypeText => Action::TypeText {

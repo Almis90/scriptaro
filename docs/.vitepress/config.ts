@@ -39,6 +39,7 @@ export default defineConfig({
         { text: 'Window layout and screenshots', link: '/guide/layout-and-capture' },
         { text: 'Paste prepared text', link: '/guide/paste-text' },
         { text: 'Typing profiles', link: '/guide/typing-profiles' },
+        { text: 'Input boundaries and timing', link: '/guide/input-boundaries' },
         { text: 'Desktop interface', link: '/guide/desktop' },
         { text: 'macOS setup', link: '/guide/macos' },
       ] },

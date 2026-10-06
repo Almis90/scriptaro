@@ -1,5 +1,10 @@
 # Examples
 
+`examples/input-boundaries.yaml` demonstrates value postconditions before changing
+fields, strict input declarations, explicit waivers and unscaled technical waits.
+See [Input boundaries and timing](/guide/input-boundaries); simulate first and
+replace its selectors before native playback.
+
 The repository separates the runnable Rust host in `example/` from YAML recipes
 in `examples/`. Neither requires a package registry release.
 

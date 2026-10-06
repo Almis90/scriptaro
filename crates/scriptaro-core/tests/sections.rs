@@ -17,12 +17,36 @@ fn retakes_have_explicit_reset_setup_readiness_and_body_order() {
     let all = script.prepare(None, false).unwrap();
     assert_eq!(all.steps.len(), 4);
     assert!(all.sections.is_empty());
-    assert_eq!(all.steps.last(), Some(&Action::Wait { duration_ms: 4 }));
+    assert_eq!(
+        all.steps.last(),
+        Some(&Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 4
+        })
+    );
     let take = script.prepare(Some("first"), true).unwrap();
-    assert_eq!(take.steps[0], Action::Wait { duration_ms: 2 });
-    assert_eq!(take.steps[1], Action::Wait { duration_ms: 1 });
+    assert_eq!(
+        take.steps[0],
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 2
+        }
+    );
+    assert_eq!(
+        take.steps[1],
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 1
+        }
+    );
     assert!(matches!(take.steps[2], Action::WaitUntil { .. }));
-    assert_eq!(take.steps[3], Action::Wait { duration_ms: 3 });
+    assert_eq!(
+        take.steps[3],
+        Action::Wait {
+            scale_with_speed: true,
+            duration_ms: 3
+        }
+    );
     assert_eq!(script.prepare(Some("first"), false).unwrap().steps.len(), 3);
 }
 #[test]

@@ -247,6 +247,10 @@ work is deferred; the existing macOS host remains available. Broader application
 and display trials, distribution/signing, and independent Windows/X11/Wayland
 backends remain later milestones. VS Code integration comes last.
 
+[Input postconditions](docs/guide/input-boundaries.md) can gate subsequent actions
+on observed state, with an opt-in strict declaration policy. Technical waits can
+remain unscaled during faster rehearsals. Fixed delays never prove input delivery.
+
 ## Controls, retakes and desktop playback
 
 Scripts can select controls by role and exact identifier/label, wait for their readiness, focus fields and invoke buttons. Named sections have explicit setup, readiness checks and optional reset actions for retakes. The macOS desktop host shares the same engine as the CLI.

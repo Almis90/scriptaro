@@ -252,6 +252,9 @@ pub enum Action {
     },
     Wait {
         duration_ms: u64,
+        /// False is a technical running-time delay, not a delivery acknowledgement.
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        scale_with_speed: bool,
     },
     WaitUntil {
         condition: Condition,
@@ -310,6 +313,10 @@ pub enum Action {
 
 fn yes() -> bool {
     true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn paste_settle_ms() -> u64 {

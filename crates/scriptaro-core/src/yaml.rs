@@ -3,7 +3,9 @@ use crate::{MAX_SCRIPT_BYTES, Script, ValidationError};
 use thiserror::Error;
 
 mod composition;
+mod input_boundaries;
 pub use composition::{CompiledScript, compile};
+pub use input_boundaries::{InputBoundaryPolicy, InputBoundarySummary};
 
 #[derive(Debug, Error)]
 pub enum ScriptError {

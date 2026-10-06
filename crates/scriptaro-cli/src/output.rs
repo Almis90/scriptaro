@@ -78,6 +78,7 @@ pub fn capability(capability: &Capability) -> &'static str {
 pub fn plan(script: &Script) -> Vec<Value> {
     script.steps.iter().enumerate().map(|(index, action)| {
         let mut value = match action {
+            Action::Wait { duration_ms, scale_with_speed } => json!({"action":"wait", "duration_ms":duration_ms, "scale_with_speed":scale_with_speed}),
             Action::PasteText { text, settle_ms } => json!({"action":"paste_text", "characters":text.chars().count(), "settle_ms":settle_ms,"clipboard":"replace_and_keep"}),
             Action::TypeText { text, interval_ms, profile } => {
                 let timing = script.defaults.typing_timing(profile.as_ref(), *interval_ms);
@@ -103,6 +104,7 @@ pub fn plan(script: &Script) -> Vec<Value> {
 pub struct RunData {
     pub script: String,
     pub source_version: Option<u32>,
+    pub input_boundaries: Option<scriptaro_core::yaml::InputBoundarySummary>,
     pub section: Option<String>,
     pub retake: bool,
     pub mode: &'static str,
@@ -118,6 +120,18 @@ pub struct RunData {
     pub failed_step: Option<usize>,
     pub started_at_unix_ms: u64,
     pub elapsed_ms: u64,
+}
+
+pub fn boundaries(summary: Option<&scriptaro_core::yaml::InputBoundarySummary>) {
+    if let Some(summary) = summary {
+        text(format_args!(
+            "Input boundaries ({:?}, entire source): {} declared postconditions, {} explicit unverified waivers, {} undeclared inputs. Declarations are not proof of delivery.",
+            summary.policy,
+            summary.postconditions,
+            summary.explicit_waivers,
+            summary.undeclared_inputs
+        ));
+    }
 }
 
 static TEXT_OUTPUT_FAILED: std::sync::atomic::AtomicBool =

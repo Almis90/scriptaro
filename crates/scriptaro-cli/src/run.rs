@@ -31,7 +31,7 @@ pub struct RunArgs {
     /// Preserve script timing in simulation; otherwise simulation is immediate.
     #[arg(long, requires = "dry_run")]
     pub realtime: bool,
-    /// Multiplier 0.01–100. Does not scale native timeouts.
+    /// Multiplier 0.01–100. Does not scale technical waits or native timeouts.
     #[arg(long, default_value_t = 1.0)]
     pub speed: f64,
     /// Countdown before playback, at most one day.
@@ -61,6 +61,7 @@ where
     let mut data = RunData {
         script: args.script.to_string_lossy().into(),
         source_version: None,
+        input_boundaries: None,
         section: args.section.clone(),
         retake: args.retake,
         mode: if args.dry_run {
@@ -169,10 +170,16 @@ where
             "Correct --speed or --start-delay-ms and retry.",
         ));
     }
-    let (script, base_dir, version) = load(&args.script, &args.variables)?;
-    data.source_version = Some(version);
-    let script = script.prepare(args.section.as_deref(), args.retake)?;
+    let (compiled, base_dir) = load(&args.script, &args.variables)?;
+    data.source_version = Some(compiled.source_version);
+    data.input_boundaries = compiled.input_boundaries;
+    let script = compiled
+        .script
+        .prepare(args.section.as_deref(), args.retake)?;
     data.total_steps = Some(script.steps.len());
+    if !json_output {
+        crate::output::boundaries(data.input_boundaries.as_ref());
+    }
     let mut backend = backend(args.dry_run)?;
     data.backend = Some(backend.name().into());
     if !json_output {

@@ -254,7 +254,7 @@ impl Script {
                     }
                     duration(*duration_ms, &location, false)?;
                 }
-                Action::Wait { duration_ms } => duration(*duration_ms, &location, false)?,
+                Action::Wait { duration_ms, .. } => duration(*duration_ms, &location, false)?,
                 Action::WaitUntil {
                     condition,
                     timeout_ms,

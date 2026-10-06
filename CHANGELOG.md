@@ -18,6 +18,19 @@
 Source and documentation are published on GitHub. Registry packages and binary
 releases remain unpublished.
 
+### Input boundaries and timing — 2026-10-06
+
+- Version 2 inputs accept authored `after` postconditions, compiled into bounded
+  readiness waits before the next action. Input is never retried while observing.
+- Optional `input_boundaries: strict` requires a postcondition or explicit
+  `unverified: true` waiver for every input action, including unused definitions.
+  Plans and reports expose declaration counts without prepared text.
+- `wait.scale_with_speed: false` preserves technical settling time at any
+  presentation speed; legacy waits retain scaled timing. Fixed delays do not
+  claim delivery acknowledgement. Native timeouts and paste settling remain unchanged.
+- Added delayed-receiver regressions, an example and authoring documentation.
+  No live desktop runs or new native qualification claims.
+
 ### Sequence parameters — 2026-10-06
 
 - Version 2 sequences can declare required/default string `params`; calls supply
