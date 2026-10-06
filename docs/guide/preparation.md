@@ -95,5 +95,8 @@ Add `--json` for machine-readable plans and discovery. Use `run --report PATH`
 to save the result of a simulation or desktop take. See
 [CLI output and reports](/guide/cli-output).
 
+To share actions across takes or vary prepared text and targets, use
+[variables and reusable sequences](/guide/reuse) through the CLI.
+
 For the playback controls and focus rules, see [Playback](/guide/playback). For
 reproducible live checks, see [Development](/guide/development).

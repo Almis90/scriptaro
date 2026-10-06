@@ -1,0 +1,34 @@
+version: 2
+name: Reusable meeting notes
+defaults:
+  character_delay_ms: 35
+variables:
+  greeting: 'Hello team'
+  topic: 'Next milestone'
+sequences:
+  heading:
+    - action: type_text
+      text: '${greeting}!'
+    - action: key_press
+      key: enter
+  notes:
+    - action: call
+      sequence: heading
+    - action: type_text
+      text: '${topic}'
+    - action: wait
+      duration_ms: 200
+sections:
+  - name: Introduction
+    # Explicitly empty: restore your scratch document yourself before a retake.
+    reset: []
+    steps:
+      - action: call
+        sequence: notes
+  - name: Closing
+    steps:
+      - action: call
+        sequence: heading
+      - action: type_text
+        # Escape literal ${...} in version 2 source.
+        text: 'Template example: $${topic}'

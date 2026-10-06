@@ -11,6 +11,7 @@ use scriptaro_engine::PlaybackController;
 use scriptaro_platform::{BackendResult, DesktopBackend, required_capabilities};
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     error::Error,
     fs::File,
     io::Read,
@@ -46,19 +47,29 @@ enum Command {
     /// Inspect a prepared take and its targets without native desktop access.
     Plan {
         script: PathBuf,
+        #[command(flatten)]
+        variables: VariableArgs,
         #[arg(long)]
         section: Option<String>,
         #[arg(long, requires = "section")]
         retake: bool,
     },
     /// Parse and validate a script without contacting native desktop APIs.
-    Validate { script: PathBuf },
+    Validate {
+        script: PathBuf,
+        #[command(flatten)]
+        variables: VariableArgs,
+    },
     /// Play a sequence. Scripts may type into and control other applications.
     Run(run::RunArgs),
     /// Show native capabilities and permission status without requesting changes.
     Doctor,
     /// List named takes and whether they have an explicit reset.
-    Sections { script: PathBuf },
+    Sections {
+        script: PathBuf,
+        #[command(flatten)]
+        variables: VariableArgs,
+    },
     /// List portable control metadata inside one exact window; never reads field values.
     Controls {
         #[command(flatten)]
@@ -73,6 +84,35 @@ enum Command {
         #[command(flatten)]
         target: AppArguments,
     },
+}
+
+#[derive(clap::Args, Default)]
+pub struct VariableArgs {
+    /// Override a declared version 2 string variable; repeat for multiple names.
+    #[arg(long = "var", value_name = "NAME=VALUE")]
+    values: Vec<String>,
+}
+impl VariableArgs {
+    fn resolve(&self) -> Result<BTreeMap<String, String>, Diagnostic> {
+        let mut result = BTreeMap::new();
+        for entry in &self.values {
+            let (name, value) = entry.split_once('=').ok_or_else(|| {
+                Diagnostic::new(
+                    "invalid_variables",
+                    "Variable override must be NAME=VALUE.",
+                    "Repeat --var for each declared variable; quote values containing spaces.",
+                )
+            })?;
+            if name.is_empty() || result.insert(name.to_owned(), value.to_owned()).is_some() {
+                return Err(Diagnostic::new(
+                    "invalid_variables",
+                    "Variable overrides must have unique, nonempty names.",
+                    "Supply each declared variable once as --var NAME=VALUE.",
+                ));
+            }
+        }
+        Ok(result)
+    }
 }
 
 #[derive(clap::Args)]
@@ -114,7 +154,8 @@ fn native_backend() -> BackendResult<Box<dyn DesktopBackend>> {
     }
 }
 
-fn load(path: &Path) -> Result<(Script, PathBuf), Diagnostic> {
+fn load(path: &Path, variables: &VariableArgs) -> Result<(Script, PathBuf, u32), Diagnostic> {
+    let overrides = variables.resolve().map_err(|e| e.at(path))?;
     let absolute = path
         .canonicalize()
         .map_err(|e| Diagnostic::io(e, "locate script", path))?;
@@ -124,12 +165,12 @@ fn load(path: &Path) -> Result<(Script, PathBuf), Diagnostic> {
         .take((MAX_SCRIPT_BYTES + 1) as u64)
         .read_to_string(&mut text)
         .map_err(|e| Diagnostic::io(e, "read UTF-8 script", path))?;
-    let script = yaml::from_str(&text).map_err(|e| Diagnostic::script(e, path))?;
+    let compiled = yaml::compile(&text, &overrides).map_err(|e| Diagnostic::script(e, path))?;
     let directory = absolute
         .parent()
         .expect("canonical file has a parent")
         .to_path_buf();
-    Ok((script, directory))
+    Ok((compiled.script, directory, compiled.source_version))
 }
 
 /// Register signals before playback so failed registration cannot leave an uncontrolled run.
@@ -215,10 +256,11 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
         }
         Command::Plan {
             script: path,
+            variables,
             section,
             retake,
         } => {
-            let (source, _) = load(&path)?;
+            let (source, _, source_version) = load(&path, &variables)?;
             let script = source
                 .prepare(section.as_deref(), retake)
                 .map_err(|e| Diagnostic::from(e).at(&path))?;
@@ -268,22 +310,28 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                     "No actions executed. Review selectors, reset effects, and waits before desktop playback."
                 );
             }
-            json!({"script":path.to_string_lossy(),"name":script.name,"section":section,"retake":retake,"defaults":script.defaults,"total_steps":script.steps.len(),"steps":output::plan(&script),"required_capabilities":required_capabilities(&script.steps).iter().map(output::capability).collect::<Vec<_>>(),"effects_executed":false})
+            json!({"source_version":source_version,"script":path.to_string_lossy(),"name":script.name,"section":section,"retake":retake,"defaults":script.defaults,"total_steps":script.steps.len(),"steps":output::plan(&script),"required_capabilities":required_capabilities(&script.steps).iter().map(output::capability).collect::<Vec<_>>(),"effects_executed":false})
         }
-        Command::Validate { script: path } => {
-            let (script, _) = load(&path)?;
+        Command::Validate {
+            script: path,
+            variables,
+        } => {
+            let (script, _, source_version) = load(&path, &variables)?;
             let total_steps = script.prepare(None, false)?.steps.len();
             if !json_output {
                 crate::output::line!(
                     "Valid Scriptaro v{} script: {} steps",
-                    script.version,
+                    source_version,
                     total_steps
                 );
             }
-            json!({"script":path.to_string_lossy(),"version":script.version,"name":script.name,"total_steps":total_steps,"valid":true})
+            json!({"source_version":source_version,"script":path.to_string_lossy(),"version":script.version,"name":script.name,"total_steps":total_steps,"valid":true})
         }
-        Command::Sections { script: path } => {
-            let (script, _) = load(&path)?;
+        Command::Sections {
+            script: path,
+            variables,
+        } => {
+            let (script, _, source_version) = load(&path, &variables)?;
             if !json_output {
                 for section in &script.sections {
                     crate::output::line!(
@@ -294,7 +342,7 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                     );
                 }
             }
-            json!({"script":path.to_string_lossy(),"sections":script.sections.iter().map(|s| json!({"name":s.name,"steps":s.steps.len(),"setup_steps":s.setup.len(),"readiness_conditions":s.requires.len(),"has_reset":s.reset.is_some(),"reset_steps":s.reset.as_ref().map(Vec::len)})).collect::<Vec<_>>()})
+            json!({"source_version":source_version,"script":path.to_string_lossy(),"sections":script.sections.iter().map(|s| json!({"name":s.name,"steps":s.steps.len(),"setup_steps":s.setup.len(),"readiness_conditions":s.requires.len(),"has_reset":s.reset.is_some(),"reset_steps":s.reset.as_ref().map(Vec::len)})).collect::<Vec<_>>()})
         }
         Command::Controls { target, window } => {
             let mut backend = native_backend()?;

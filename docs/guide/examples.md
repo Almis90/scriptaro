@@ -68,3 +68,15 @@ It is a visual simulation, not a native automation host.
 ## Controls and retakes
 
 `examples/sections.yaml` is a portable wait-only rehearsal with two named takes and explicit empty resets. It is suitable for the desktop UI smoke test. `examples/controls-macos.yaml` demonstrates field targeting and an explicit reset that replaces the selected field’s text; replace its placeholder application and selectors before native playback. See [script format](/script-format) and [desktop interface](/guide/desktop).
+
+## Reusable notes
+
+`examples/reusable.yaml` uses version 2 string variables and nested sequences in
+two named takes. Rehearse without desktop input:
+
+```sh
+scriptaro run examples/reusable.yaml --section Introduction --dry-run --var 'topic=Launch planning'
+```
+
+See [Variables and reusable sequences](/guide/reuse) for the complete example
+and CLI override rules.

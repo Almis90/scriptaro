@@ -25,3 +25,8 @@ playback checks that referenced files exist before activating an application.
 
 - `sections.yaml`: portable wait-only rehearsal with named takes and explicit empty resets.
 - `controls-macos.yaml`: control targeting and a reset that replaces selected field contents; placeholder selectors must be replaced using `scriptaro controls`.
+
+`reusable.yaml` is a CLI version 2 example with string variables and nested action
+sequences. Run `scriptaro plan examples/reusable.yaml --var 'topic=Launch planning'`
+from the repository root, then rehearse with `run --dry-run`. The native editor
+currently supports version 1 only.

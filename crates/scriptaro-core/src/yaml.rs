@@ -2,6 +2,9 @@
 use crate::{MAX_SCRIPT_BYTES, Script, ValidationError};
 use thiserror::Error;
 
+mod composition;
+pub use composition::{CompiledScript, compile};
+
 #[derive(Debug, Error)]
 pub enum ScriptError {
     #[error("script exceeds the {MAX_SCRIPT_BYTES}-byte limit")]

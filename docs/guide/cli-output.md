@@ -57,6 +57,10 @@ Actions use the YAML action field names. `type_text` replaces the prepared text
 with `characters` (Unicode scalar count) and effective `interval_ms`.
 Defaulted action timeouts are resolved to numeric `timeout_ms` values.
 
+Script results include `source_version`; validation
+`version` describes the compiled runtime model. For [version 2 sources](/guide/reuse),
+these are `2` and `1` respectively.
+
 `validate` returns script metadata and the total prepared step count. `sections`
 returns take names and counts for body, setup, readiness and optional reset.
 `recipes` lists starter IDs and descriptions; `init` returns the created path
@@ -80,7 +84,7 @@ requires macOS, with Accessibility for window/control metadata.
 `run --report PATH` works with text output or `--json`. The saved result has the
 same envelope as JSON stdout, formatted for reading. Its `data` records:
 
-- Requested script, section and retake selection.
+- Requested script, source version (once compiled), section and retake selection.
 - `mode` (`simulation` or `desktop`), backend, speed and countdown.
 - `readiness_assumed` and `timing_preserved`. Ordinary simulation skips delays;
   `--realtime` preserves them. Simulation always assumes readiness.

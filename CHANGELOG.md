@@ -90,3 +90,16 @@ releases remain unpublished.
   context. Plans omit prepared text and expose effective typing/readiness timing.
 - Added simulated CLI coverage for JSON, saved reports, cancellation, partial
   failure and report-write failure. No new live desktop verification was needed.
+
+### CLI variables and reusable sequences — 2026-10-06
+
+- Added opt-in version 2 authoring with declared string variables, repeatable
+  `--var NAME=VALUE` overrides and nested, named action sequences. Version 1 text
+  remains literal, including JavaScript/shell placeholders.
+- Added a platform-neutral YAML compiler that resolves values and calls before
+  native backend creation. Full validation includes unused definitions, cycle
+  detection, nesting and expansion limits, and existing action validation.
+- Integrated compilation into validate, plan, sections and run; JSON results and
+  reports expose source version without storing variable assignments.
+- Added a reusable notes example, authoring guide and portable compilation/CLI
+  regression coverage. UI authoring remains version 1; no live retest is needed.

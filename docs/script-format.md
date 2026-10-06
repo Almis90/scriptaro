@@ -1,6 +1,10 @@
-# Script format, version 1
+# Script format
 
-YAML uses a required `version: 1` and nonempty `steps` list, plus optional `name`
+The runtime action format below is version 1. The CLI also accepts
+[version 2 authoring](/guide/reuse), which adds string variables and reusable
+sequences and compiles into these same actions. Version 1 text remains literal.
+
+Version 1 YAML uses a required `version: 1` and nonempty `steps` list, plus optional `name`
 and `defaults`. Every action is a mapping with an `action` discriminator.
 Unknown fields, duplicate keys, malformed selectors, invalid key names, and
 unsupported script versions are errors. YAML source is limited to 4 MiB and

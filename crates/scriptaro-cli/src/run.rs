@@ -1,4 +1,5 @@
 use crate::{
+    VariableArgs,
     diagnostic::Diagnostic,
     load, native_backend,
     output::{Outcome, RunData},
@@ -16,6 +17,8 @@ use std::{
 #[derive(clap::Args)]
 pub struct RunArgs {
     pub script: PathBuf,
+    #[command(flatten)]
+    pub variables: VariableArgs,
     /// Simulate without native APIs or permission requirements.
     #[arg(long)]
     pub dry_run: bool,
@@ -57,6 +60,7 @@ where
     let started = Instant::now();
     let mut data = RunData {
         script: args.script.to_string_lossy().into(),
+        source_version: None,
         section: args.section.clone(),
         retake: args.retake,
         mode: if args.dry_run {
@@ -164,7 +168,8 @@ where
             "Correct --speed or --start-delay-ms and retry.",
         ));
     }
-    let (script, base_dir) = load(&args.script)?;
+    let (script, base_dir, version) = load(&args.script, &args.variables)?;
+    data.source_version = Some(version);
     let script = script.prepare(args.section.as_deref(), args.retake)?;
     data.total_steps = Some(script.steps.len());
     let mut backend = backend(args.dry_run)?;
@@ -318,6 +323,7 @@ mod tests {
         fs::write(&script, "version: 1\nsteps:\n  - {action: wait, duration_ms: 0}\n  - {action: type_text, text: xy, interval_ms: 0}\n  - {action: wait, duration_ms: 0}\n").unwrap();
         RunArgs {
             script,
+            variables: VariableArgs::default(),
             dry_run: true,
             section: None,
             retake: false,

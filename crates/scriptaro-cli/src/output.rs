@@ -84,6 +84,7 @@ pub fn plan(script: &Script) -> Vec<Value> {
 #[derive(Debug, Serialize)]
 pub struct RunData {
     pub script: String,
+    pub source_version: Option<u32>,
     pub section: Option<String>,
     pub retake: bool,
     pub mode: &'static str,

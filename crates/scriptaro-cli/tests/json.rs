@@ -367,3 +367,79 @@ fn unsupported_discovery_has_json_diagnostics_instead_of_mixed_text() {
     let doctor = json(&cli().args(["doctor", "--json"]).output().unwrap(), 0);
     assert_eq!(doctor["data"]["native_supported"], false);
 }
+
+#[test]
+fn variables_and_sequences_work_through_plan_validation_sections_and_saved_runs() {
+    let scratch = Scratch::new();
+    let path = scratch.script("version: 2\nvariables: {text: null}\nsequences:\n  line: [{action: type_text, text: '${text}'}]\nsections:\n  - name: Intro\n    reset: []\n    steps: [{action: call, sequence: line}]\n");
+    for command in ["validate", "plan", "sections"] {
+        let output = cli()
+            .arg(command)
+            .arg(&path)
+            .args(["--json", "--var", "text=PRIVATE=a 🦀"])
+            .output()
+            .unwrap();
+        let value = json(&output, 0);
+        assert_eq!(value["data"]["source_version"], 2);
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+        if command == "plan" {
+            assert_eq!(value["data"]["total_steps"], 1);
+            assert_eq!(value["data"]["steps"][0]["characters"], 11);
+        }
+    }
+    let report = scratch.0.join("reusable.json");
+    let output = cli()
+        .arg("run")
+        .arg(&path)
+        .args([
+            "--dry-run",
+            "--json",
+            "--section",
+            "Intro",
+            "--retake",
+            "--var",
+            "text=PRIVATE=a 🦀",
+            "--report",
+        ])
+        .arg(&report)
+        .output()
+        .unwrap();
+    let value = json(&output, 0);
+    assert_eq!(value["data"]["source_version"], 2);
+    assert_eq!(value["data"]["completed_steps"], 1);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&report).unwrap()).unwrap(),
+        value
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+    // Missing variables fail before any native backend is constructed, with a saved failure.
+    let failed = scratch.0.join("missing-variable.json");
+    let output = cli()
+        .arg("run")
+        .arg(&path)
+        .args(["--json", "--report"])
+        .arg(&failed)
+        .output()
+        .unwrap();
+    let value = json(&output, 1);
+    assert_eq!(value["error"]["code"], "invalid_script");
+    assert!(value["data"]["backend"].is_null());
+    assert_eq!(value["data"]["completed_steps"], 0);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&failed).unwrap()).unwrap(),
+        value
+    );
+    for arguments in [
+        vec!["text=one", "text=two"],
+        vec!["missing-equals"],
+        vec!["=value"],
+    ] {
+        let mut command = cli();
+        command.arg("plan").arg(&path).arg("--json");
+        for argument in arguments {
+            command.args(["--var", argument]);
+        }
+        let value = json(&command.output().unwrap(), 1);
+        assert_eq!(value["error"]["code"], "invalid_variables");
+    }
+}
