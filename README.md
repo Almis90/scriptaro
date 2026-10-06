@@ -20,6 +20,8 @@ Xcode Command Line Tools. Then, from this directory:
 cargo build --workspace --locked
 cargo run -- validate examples/hello.yaml
 cargo run -- run examples/tutorial-macos.yaml --dry-run
+cargo run -- plan examples/hello.yaml --json
+cargo run -- run examples/hello.yaml --dry-run --json --report first-run.json
 cargo run -- doctor
 cargo run -- apps
 cargo run -- windows --app com.apple.TextEdit
@@ -220,8 +222,8 @@ untouched during playback. See the [trial setup and limits](docs/guide/developme
   `scriptaro_core::yaml`. Scripts are bounded and strictly validated, but the
   parser is not a security sandbox for adversarial input.
 
-Current development focuses on the CLI: structured output for plans and discovery,
-saved run reports, and clearer diagnostics for scripted workflows. Further UI
+The CLI provides [structured output and saved run reports](docs/guide/cli-output.md),
+with actionable diagnostics for scripted workflows. Further UI
 work is deferred; the existing macOS host remains available. Broader application
 and display trials, distribution/signing, and independent Windows/X11/Wayland
 backends remain later milestones. VS Code integration comes last.

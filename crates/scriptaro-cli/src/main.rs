@@ -1,14 +1,21 @@
+mod diagnostic;
+mod output;
+mod report;
+mod run;
+
 use clap::{Parser, Subcommand};
+use diagnostic::Diagnostic;
+use output::Outcome;
 use scriptaro_core::{AppSelector, MAX_SCRIPT_BYTES, Script, WindowSelector, yaml};
-use scriptaro_engine::{Engine, PlaybackController, PlaybackEvent, RunOptions, RunStatus};
-use scriptaro_platform::{BackendResult, DesktopBackend, recording::RecordingBackend};
+use scriptaro_engine::PlaybackController;
+use scriptaro_platform::{BackendResult, DesktopBackend, required_capabilities};
+use serde_json::{Value, json};
 use std::{
     error::Error,
     fs::File,
     io::Read,
     path::{Path, PathBuf},
     process::ExitCode,
-    time::Duration,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -19,6 +26,9 @@ use tracing_subscriber::EnvFilter;
     about = "Script and replay desktop actions"
 )]
 struct Cli {
+    /// Emit one versioned JSON result to stdout (help/version remain plain text).
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -44,27 +54,7 @@ enum Command {
     /// Parse and validate a script without contacting native desktop APIs.
     Validate { script: PathBuf },
     /// Play a sequence. Scripts may type into and control other applications.
-    Run {
-        script: PathBuf,
-        /// Simulate all operations without native APIs or permission requirements.
-        #[arg(long)]
-        dry_run: bool,
-        /// Run only one named section, including its setup and readiness checks.
-        #[arg(long)]
-        section: Option<String>,
-        /// Run the section’s explicit reset before setup and playback.
-        #[arg(long, requires = "section")]
-        retake: bool,
-        /// Preserve timing in a dry run (otherwise simulation completes immediately).
-        #[arg(long, requires = "dry_run")]
-        realtime: bool,
-        /// Playback multiplier, from 0.01 to 100. Does not scale native timeouts.
-        #[arg(long, default_value_t = 1.0)]
-        speed: f64,
-        /// Countdown before playback, allowing time to focus a target or start recording.
-        #[arg(long, default_value_t = 3000)]
-        start_delay_ms: u64,
-    },
+    Run(run::RunArgs),
     /// Show native capabilities and permission status without requesting changes.
     Doctor,
     /// List named takes and whether they have an explicit reset.
@@ -124,16 +114,20 @@ fn native_backend() -> BackendResult<Box<dyn DesktopBackend>> {
     }
 }
 
-fn load(path: &Path) -> Result<(Script, PathBuf), Box<dyn Error>> {
-    let absolute = path.canonicalize()?;
+fn load(path: &Path) -> Result<(Script, PathBuf), Diagnostic> {
+    let absolute = path
+        .canonicalize()
+        .map_err(|e| Diagnostic::io(e, "locate script", path))?;
     let mut text = String::new();
-    File::open(&absolute)?
+    File::open(&absolute)
+        .map_err(|e| Diagnostic::io(e, "open script", path))?
         .take((MAX_SCRIPT_BYTES + 1) as u64)
-        .read_to_string(&mut text)?;
-    let script = yaml::from_str(&text)?;
+        .read_to_string(&mut text)
+        .map_err(|e| Diagnostic::io(e, "read UTF-8 script", path))?;
+    let script = yaml::from_str(&text).map_err(|e| Diagnostic::script(e, path))?;
     let directory = absolute
         .parent()
-        .ok_or("script has no parent directory")?
+        .expect("canonical file has a parent")
         .to_path_buf();
     Ok((script, directory))
 }
@@ -171,233 +165,215 @@ fn signal_task(
     }
 }
 
-async fn execute(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
-    match cli.command {
+impl Command {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Recipes => "recipes",
+            Self::Init { .. } => "init",
+            Self::Plan { .. } => "plan",
+            Self::Validate { .. } => "validate",
+            Self::Run(_) => "run",
+            Self::Doctor => "doctor",
+            Self::Sections { .. } => "sections",
+            Self::Controls { .. } => "controls",
+            Self::Apps => "apps",
+            Self::Windows { .. } => "windows",
+        }
+    }
+}
+
+fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
+    Ok(match command {
         Command::Recipes => {
-            for recipe in scriptaro_core::recipes::RECIPES {
-                println!("{}\t{}", recipe.id, recipe.description);
+            let recipes = scriptaro_core::recipes::RECIPES;
+            if !json_output {
+                for recipe in recipes {
+                    crate::output::line!("{}\t{}", recipe.id, recipe.description);
+                }
             }
+            json!({"recipes":recipes.iter().map(|r| json!({"id":r.id,"description":r.description})).collect::<Vec<_>>()})
         }
         Command::Init { path, recipe } => {
-            let recipe = scriptaro_core::recipes::find(&recipe)
-                .ok_or("unknown recipe; use `scriptaro recipes` to list starters")?;
-            recipe.create(&path)?;
-            println!(
-                "Created {} from {}. Replace the selectors and prepared text, then use `plan` and `run --dry-run` to rehearse.",
-                path.display(),
-                recipe.id
-            );
+            let recipe = scriptaro_core::recipes::find(&recipe).ok_or_else(|| {
+                Diagnostic::new(
+                    "unknown_recipe",
+                    format!("Unknown recipe: {recipe}"),
+                    "Use recipes to list available starters.",
+                )
+            })?;
+            recipe
+                .create(&path)
+                .map_err(|e| Diagnostic::io(e, "create starter", &path))?;
+            if !json_output {
+                crate::output::line!(
+                    "Created {} from {}. Customize the actions, then use `plan` and `run --dry-run` to rehearse.",
+                    path.display(),
+                    recipe.id
+                );
+            }
+            json!({"path":path.to_string_lossy(),"recipe":recipe.id,"created":true})
         }
         Command::Plan {
             script: path,
             section,
             retake,
         } => {
-            let (script, _) = load(&path)?;
-            let script = script.prepare(section.as_deref(), retake)?;
-            println!(
-                "{}: {} actions ({})",
-                section.as_deref().unwrap_or("All sections"),
-                script.steps.len(),
-                if retake {
-                    "reset → setup → readiness → body"
-                } else {
-                    "setup → readiness → body"
+            let (source, _) = load(&path)?;
+            let script = source
+                .prepare(section.as_deref(), retake)
+                .map_err(|e| Diagnostic::from(e).at(&path))?;
+            if !json_output {
+                crate::output::line!(
+                    "{}: {} actions ({})",
+                    section.as_deref().unwrap_or("All sections"),
+                    script.steps.len(),
+                    if retake {
+                        "reset → setup → readiness → body"
+                    } else {
+                        "setup → readiness → body"
+                    }
+                );
+                for (index, action) in script.steps.iter().enumerate() {
+                    use scriptaro_core::Action;
+                    let detail = match action {
+                        Action::TypeText { text, interval_ms } => format!(
+                            "{} characters; {} ms between characters",
+                            text.chars().count(),
+                            interval_ms.unwrap_or(script.defaults.character_delay_ms)
+                        ),
+                        Action::Wait { duration_ms } => format!("{duration_ms} ms"),
+                        Action::ActivateApp { app, .. } => format!("{app:?}"),
+                        Action::ActivateWindow { window, .. } => {
+                            format!("{:?}; title={:?}", window.app, window.title)
+                        }
+                        Action::FocusControl { control, .. }
+                        | Action::InvokeControl { control, .. } => format!("{control:?}"),
+                        Action::WaitUntil { condition, .. } => format!("{condition:?}"),
+                        Action::KeyPress { key, modifiers } => format!("{modifiers:?} + {key:?}"),
+                        Action::OpenFile { path, app, .. } => {
+                            format!("{}; app={app:?}", path.display())
+                        }
+                        Action::MouseMove { x, y } => format!("x={x}; y={y}"),
+                        Action::MouseClick { button, count } => {
+                            format!("{button:?}; count={count}")
+                        }
+                        Action::Scroll {
+                            horizontal,
+                            vertical,
+                        } => format!("horizontal={horizontal}; vertical={vertical}"),
+                    };
+                    crate::output::line!("{:>4}  {}  {}", index + 1, action.kind(), detail);
                 }
-            );
-            for (index, action) in script.steps.iter().enumerate() {
-                use scriptaro_core::Action;
-                let detail = match action {
-                    Action::TypeText { text, interval_ms } => format!(
-                        "{} characters; {} ms between characters",
-                        text.chars().count(),
-                        interval_ms.unwrap_or(script.defaults.character_delay_ms)
-                    ),
-                    Action::Wait { duration_ms } => format!("{duration_ms} ms"),
-                    Action::ActivateApp { app, .. } => format!("{app:?}"),
-                    Action::ActivateWindow { window, .. } => {
-                        format!("{:?}; title={:?}", window.app, window.title)
-                    }
-                    Action::FocusControl { control, .. }
-                    | Action::InvokeControl { control, .. } => format!("{control:?}"),
-                    Action::WaitUntil { condition, .. } => format!("{condition:?}"),
-                    Action::KeyPress { key, modifiers } => format!("{modifiers:?} + {key:?}"),
-                    Action::OpenFile { path, app, .. } => {
-                        format!("{}; app={app:?}", path.display())
-                    }
-                    Action::MouseMove { x, y } => format!("x={x}; y={y}"),
-                    Action::MouseClick { button, count } => format!("{button:?}; count={count}"),
-                    Action::Scroll {
-                        horizontal,
-                        vertical,
-                    } => format!("horizontal={horizontal}; vertical={vertical}"),
-                };
-                println!("{:>4}  {}  {}", index + 1, action.kind(), detail);
-            }
-            println!(
-                "No actions executed. Review selectors, reset effects, and waits before desktop playback."
-            );
-        }
-        Command::Validate { script } => {
-            let (script, _) = load(&script)?;
-            println!(
-                "Valid Scriptaro v{} script: {} steps",
-                script.version,
-                script.prepare(None, false)?.steps.len()
-            );
-        }
-        Command::Sections { script } => {
-            let (script, _) = load(&script)?;
-            for section in script.sections {
-                println!(
-                    "{:?}\t{} steps\treset: {}",
-                    section.name,
-                    section.steps.len(),
-                    section.reset.is_some()
+                crate::output::line!(
+                    "No actions executed. Review selectors, reset effects, and waits before desktop playback."
                 );
             }
+            json!({"script":path.to_string_lossy(),"name":script.name,"section":section,"retake":retake,"defaults":script.defaults,"total_steps":script.steps.len(),"steps":output::plan(&script),"required_capabilities":required_capabilities(&script.steps).iter().map(output::capability).collect::<Vec<_>>(),"effects_executed":false})
+        }
+        Command::Validate { script: path } => {
+            let (script, _) = load(&path)?;
+            let total_steps = script.prepare(None, false)?.steps.len();
+            if !json_output {
+                crate::output::line!(
+                    "Valid Scriptaro v{} script: {} steps",
+                    script.version,
+                    total_steps
+                );
+            }
+            json!({"script":path.to_string_lossy(),"version":script.version,"name":script.name,"total_steps":total_steps,"valid":true})
+        }
+        Command::Sections { script: path } => {
+            let (script, _) = load(&path)?;
+            if !json_output {
+                for section in &script.sections {
+                    crate::output::line!(
+                        "{:?}\t{} steps\treset: {}",
+                        section.name,
+                        section.steps.len(),
+                        section.reset.is_some()
+                    );
+                }
+            }
+            json!({"script":path.to_string_lossy(),"sections":script.sections.iter().map(|s| json!({"name":s.name,"steps":s.steps.len(),"setup_steps":s.setup.len(),"readiness_conditions":s.requires.len(),"has_reset":s.reset.is_some(),"reset_steps":s.reset.as_ref().map(Vec::len)})).collect::<Vec<_>>()})
         }
         Command::Controls { target, window } => {
             let mut backend = native_backend()?;
-            for control in backend.list_controls(&WindowSelector {
+            let window = WindowSelector {
                 app: target.selector(),
                 title: window,
-            })? {
-                println!(
-                    "{:?}\tidentifier={:?}\tlabel={:?}\tlabel_available={}",
-                    control.role, control.identifier, control.label, control.label_available
-                );
+            };
+            let controls = backend.list_controls(&window)?;
+            if !json_output {
+                for control in &controls {
+                    crate::output::line!(
+                        "{:?}\tidentifier={:?}\tlabel={:?}\tlabel_available={}",
+                        control.role,
+                        control.identifier,
+                        control.label,
+                        control.label_available
+                    );
+                }
             }
+            json!({"window":window,"controls":controls.iter().map(|c| json!({"role":c.role,"identifier":c.identifier,"label":c.label,"label_available":c.label_available})).collect::<Vec<_>>()})
         }
         Command::Doctor => {
             let backend = native_backend()?;
-            println!("Backend: {}", backend.name());
-            println!("Capabilities: {:?}", backend.capabilities());
-            for permission in backend.permissions() {
-                println!(
-                    "{}: {} — {}",
-                    permission.name,
-                    if permission.granted {
-                        "granted"
-                    } else {
-                        "not granted"
-                    },
-                    permission.purpose
-                );
+            let capabilities = backend.capabilities();
+            let permissions = backend.permissions();
+            if !json_output {
+                crate::output::line!("Backend: {}", backend.name());
+                crate::output::line!("Capabilities: {capabilities:?}");
+                for permission in &permissions {
+                    crate::output::line!(
+                        "{}: {} — {}",
+                        permission.name,
+                        if permission.granted {
+                            "granted"
+                        } else {
+                            "not granted"
+                        },
+                        permission.purpose
+                    );
+                }
+                if capabilities.is_empty() {
+                    crate::output::line!(
+                        "Native automation is not implemented on this platform. Validation and dry runs are available."
+                    );
+                }
             }
-            if backend.capabilities().is_empty() {
-                println!(
-                    "Native automation is not implemented on this platform. Validation and dry runs are available."
-                );
-            }
+            json!({"backend":backend.name(),"native_supported":!capabilities.is_empty(),"capabilities":capabilities.iter().map(output::capability).collect::<Vec<_>>(),"permissions":permissions.iter().map(|p| json!({"name":p.name,"granted":p.granted,"purpose":p.purpose})).collect::<Vec<_>>()})
         }
         Command::Apps => {
             let backend = native_backend()?;
-            let mut applications = backend.list_applications()?;
-            applications.sort_by(|a, b| a.name.cmp(&b.name));
-            println!("PID\tIDENTIFIER\tNAME");
-            for app in applications {
-                println!(
-                    "{}\t{}\t{}",
-                    app.pid,
-                    app.identifier.as_deref().unwrap_or("—"),
-                    app.name
-                );
+            let mut apps = backend.list_applications()?;
+            apps.sort_by(|a, b| a.name.cmp(&b.name).then(a.pid.cmp(&b.pid)));
+            if !json_output {
+                crate::output::line!("PID\tIDENTIFIER\tNAME");
+                for app in &apps {
+                    crate::output::line!(
+                        "{}\t{}\t{}",
+                        app.pid,
+                        app.identifier.as_deref().unwrap_or("—"),
+                        app.name
+                    );
+                }
             }
+            json!({"applications":apps.iter().map(|a| json!({"pid":a.pid,"identifier":a.identifier,"name":a.name})).collect::<Vec<_>>()})
         }
         Command::Windows { target } => {
             let mut backend = native_backend()?;
-            let mut windows = backend.list_windows(&target.selector())?;
+            let app = target.selector();
+            let mut windows = backend.list_windows(&app)?;
             windows.sort_by(|a, b| a.title.cmp(&b.title));
-            for window in windows {
-                // Debug escaping preserves titles containing tabs/newlines in one row.
-                println!("{:?}", window.title);
-            }
-        }
-        Command::Run {
-            script: path,
-            dry_run,
-            section,
-            retake,
-            realtime,
-            speed,
-            start_delay_ms,
-        } => {
-            let (script, base_dir) = load(&path)?;
-            let script = script.prepare(section.as_deref(), retake)?;
-            if start_delay_ms > 86_400_000 {
-                return Err("start delay must not exceed one day".into());
-            }
-            let mut backend: Box<dyn DesktopBackend> = if dry_run {
-                Box::new(RecordingBackend::default())
-            } else {
-                native_backend()?
-            };
-            println!(
-                "{} {} steps via {} (PID {})",
-                if dry_run { "Simulating" } else { "Playing" },
-                script.steps.len(),
-                backend.name(),
-                std::process::id()
-            );
-            if !dry_run {
-                println!(
-                    "Start delay: {start_delay_ms} ms. Ctrl+C in this terminal stops playback."
-                );
-                #[cfg(unix)]
-                println!(
-                    "Signals from another terminal: USR1 pauses, USR2 resumes, INT/TERM cancels."
-                );
-                for permission in backend.permissions() {
-                    if permission.name == "Input Monitoring" && permission.granted {
-                        println!("Global stop: hold Control + Option + Escape.");
-                    }
+            if !json_output {
+                for window in &windows {
+                    crate::output::line!("{:?}", window.title);
                 }
             }
-            let engine = Engine::new(
-                backend.as_mut(),
-                RunOptions {
-                    base_dir,
-                    speed,
-                    skip_delays: dry_run && !realtime,
-                    initial_delay: Duration::from_millis(start_delay_ms),
-                },
-            );
-            let mut events = engine.subscribe();
-            let signal = signal_task(engine.controller())?;
-            let progress = tokio::spawn(async move {
-                loop {
-                    match events.recv().await {
-                        Ok(PlaybackEvent::StepStarted { step, action }) => {
-                            println!("  {step}: {action}")
-                        }
-                        Ok(PlaybackEvent::StateChanged(state)) => println!("  Playback {state:?}"),
-                        Ok(PlaybackEvent::Finished(_))
-                        | Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!(n, "progress observer lagged")
-                        }
-                        _ => {}
-                    }
-                }
-            });
-            let result = engine.run(&script).await;
-            signal.abort();
-            let _ = signal.await;
-            let _ = progress.await;
-            let report = result?;
-            println!(
-                "{:?}: {}/{} steps completed",
-                report.status,
-                report.completed_steps,
-                script.steps.len()
-            );
-            if report.status == RunStatus::Cancelled {
-                return Ok(ExitCode::from(130));
-            }
+            json!({"app":app,"windows":windows.iter().map(|w| json!({"title":w.title})).collect::<Vec<_>>()})
         }
-    }
-    Ok(ExitCode::SUCCESS)
+        Command::Run(_) => unreachable!("runs use the report-aware execution path"),
+    })
 }
 
 // AppKit stays on its owning main thread; engine timers and signals remain asynchronous.
@@ -409,11 +385,49 @@ async fn main() -> ExitCode {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
         )
         .init();
-    match execute(Cli::parse()).await {
-        Ok(code) => code,
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
         Err(error) => {
-            eprintln!("scriptaro: {error}");
-            ExitCode::FAILURE
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) {
+                let _ = error.print();
+                return ExitCode::SUCCESS;
+            }
+            let json_output = std::env::args_os()
+                .skip(1)
+                .take_while(|a| a != "--")
+                .any(|a| a == "--json");
+            let mut outcome = Outcome::failed(
+                "arguments",
+                Diagnostic::new(
+                    "usage",
+                    error.to_string(),
+                    "Run scriptaro --help or scriptaro <command> --help for supported arguments.",
+                ),
+            );
+            outcome.exit_code = 2;
+            let _ = outcome.emit(json_output);
+            return ExitCode::from(2);
         }
+    };
+    let json_output = cli.json;
+    let command_name = cli.command.name();
+    let outcome = match cli.command {
+        Command::Run(args) => run::execute(args, json_output).await,
+        command => match execute(command, json_output) {
+            Ok(data) => Outcome::new(command_name, data),
+            Err(error) => Outcome::failed(command_name, error),
+        },
+    };
+    if let Err(error) = outcome.emit(json_output) {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "scriptaro [output_write_failed]: {error}. Playback, if requested, has already finished; consult --report before retrying."
+        );
+        return ExitCode::FAILURE;
     }
+    ExitCode::from(outcome.exit_code)
 }

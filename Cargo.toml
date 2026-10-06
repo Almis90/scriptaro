@@ -18,6 +18,7 @@ scriptaro-engine = { path = "crates/scriptaro-engine" }
 scriptaro-platform-macos = { path = "crates/scriptaro-platform-macos" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9.34"
+serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "macros", "time", "sync", "signal"] }
 tracing = "0.1"

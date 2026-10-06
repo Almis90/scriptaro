@@ -78,3 +78,15 @@ releases remain unpublished.
   host, examples, tests and documentation changes to the existing repository.
 - Updated documentation hosting instructions to match the enabled Pages site.
 - Prioritized CLI structured output, run reports and diagnostics; deferred further UI work.
+
+### CLI output and reports — 2026-10-06
+
+- Added global `--json` output with a versioned result envelope for preparation,
+  discovery, diagnostics and playback. Progress stays out of JSON stdout.
+- Added `run --report PATH`: reserves a new report before playback and saves
+  completion, cancellation or failure with authoritative completed-step counts.
+  Existing files are preserved; report errors never trigger replay.
+- Added diagnostic codes, corrective hints, YAML locations and failed-step
+  context. Plans omit prepared text and expose effective typing/readiness timing.
+- Added simulated CLI coverage for JSON, saved reports, cancellation, partial
+  failure and report-write failure. No new live desktop verification was needed.

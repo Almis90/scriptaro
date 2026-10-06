@@ -91,5 +91,9 @@ longer delays for slower applications, and retest when changing playback speed,
 which scales scripted waits. Configure app auto-formatting and completion for
 your demonstration; the engine does not rewrite your text to compensate.
 
+Add `--json` for machine-readable plans and discovery. Use `run --report PATH`
+to save the result of a simulation or desktop take. See
+[CLI output and reports](/guide/cli-output).
+
 For the playback controls and focus rules, see [Playback](/guide/playback). For
 reproducible live checks, see [Development](/guide/development).
