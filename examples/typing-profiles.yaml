@@ -1,0 +1,31 @@
+version: 2
+name: Repeatable typing cadence
+defaults:
+  typing_profile: natural
+variables:
+  introduction: 'Hello, everyone!'
+steps:
+  # Prepare a scratch document before native playback. This draft has no target.
+  - action: type_text
+    text: '${introduction}'
+  - action: key_press
+    key: enter
+  - action: type_text
+    profile: brisk
+    text: 'A quicker sentence, with pauses.'
+  - action: key_press
+    key: enter
+  - action: type_text
+    profile:
+      interval_ms: 60
+      jitter_ms: 15
+      word_pause_ms: 60
+      punctuation_pause_ms: 180
+      line_pause_ms: 300
+      seed: 42
+    text: |-
+      This custom rhythm is repeatable.
+      So is the pause between lines.
+  - action: type_text
+    interval_ms: 0
+    text: ' End.'

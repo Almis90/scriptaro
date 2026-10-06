@@ -104,12 +104,14 @@ fn control_characters_are_rejected_but_newlines_tabs_and_unicode_work() {
         name: None,
         defaults: Default::default(),
         steps: vec![Action::TypeText {
+            profile: None,
             text: "🦀\n\tΚαλημέρα".into(),
             interval_ms: None,
         }],
     };
     script.validate().unwrap();
     script.steps = vec![Action::TypeText {
+        profile: None,
         text: "hello\0world".into(),
         interval_ms: None,
     }];

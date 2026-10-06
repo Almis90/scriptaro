@@ -34,6 +34,7 @@ fn activate() -> Action {
 }
 fn text() -> Action {
     Action::TypeText {
+        profile: None,
         text: "x".into(),
         interval_ms: None,
     }

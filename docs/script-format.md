@@ -20,8 +20,14 @@ defaults:
 
 Durations are integer milliseconds, at most one day per value. Typing intervals
 and waits may be zero; native timeouts must be positive. `--speed` accepts finite
-values from 0.01 to 100 and scales explicit waits and character intervals only.
+values from 0.01 to 100 and scales explicit waits, typing gaps, and pointer motion.
 Characters have a delay **between** them, with no trailing delay.
+
+Optional `defaults.typing_profile` selects `steady`, `natural`, `brisk`, or a custom
+timing mapping. A `type_text` step can override it with `profile`, or with a fixed
+`interval_ms` (not both). [Typing profiles](/guide/typing-profiles) describe seeded
+variation and boundary pauses. Playback speed scales all typing gaps and pointer
+motion; paste settling delays and native timeouts remain unscaled.
 
 Native timeouts measure elapsed wall time, including pauses. A timeout that
 elapses while paused is reported on resume; cancellation still interrupts the
@@ -39,7 +45,7 @@ pause immediately. Pausing does not undo an OS request already sent.
 | `activate_app` | `app` | `timeout_ms` |
 | `activate_window` | `window` | `timeout_ms` |
 | `open_file` | `path` | `app`, `timeout_ms` |
-| `type_text` | `text` | `interval_ms` |
+| `type_text` | `text` | `interval_ms` or `profile` |
 | `paste_text` | `text` (nonempty) | `settle_ms` (`200`) |
 | `key_press` | `key` | `modifiers` (default `[]`) |
 | `mouse_move` | finite `x`, `y` | `duration_ms` (default `0`, instant) |

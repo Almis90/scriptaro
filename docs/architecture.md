@@ -157,3 +157,9 @@ Preparation replaces the clipboard without posting input. The engine rechecks
 focus/control state before consuming the token to dispatch one shortcut. Tokens
 can reject changed clipboard ownership; dropping one sends no input and does not
 restore clipboard contents. The unscaled settling delay remains engine policy.
+
+Typing profiles are core data with a shared resolver for step/default precedence.
+The CLI shows the resolved timing and the engine creates fresh deterministic
+cadence state per text action. Delay variation and boundary pauses use the existing
+pause/cancel/speed machinery and never change the emitted character sequence.
+Backends require no profile-specific behavior or capabilities.

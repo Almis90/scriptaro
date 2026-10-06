@@ -1,3 +1,4 @@
+use crate::TypingProfile;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -32,6 +33,8 @@ pub struct Section {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Defaults {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typing_profile: Option<TypingProfile>,
     /// Delay between Unicode scalar values; there is no trailing delay.
     pub character_delay_ms: u64,
     /// Default timeout for app activation and native open requests.
@@ -41,6 +44,7 @@ pub struct Defaults {
 impl Default for Defaults {
     fn default() -> Self {
         Self {
+            typing_profile: None,
             character_delay_ms: 40,
             timeout_ms: 5_000,
         }
@@ -273,6 +277,8 @@ pub enum Action {
     },
     TypeText {
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<TypingProfile>,
         #[serde(default)]
         interval_ms: Option<u64>,
     },

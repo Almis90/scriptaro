@@ -18,6 +18,7 @@ fn script(steps: Vec<Action>) -> Script {
 }
 fn text(value: &str, interval: u64) -> Action {
     Action::TypeText {
+        profile: None,
         text: value.into(),
         interval_ms: Some(interval),
     }

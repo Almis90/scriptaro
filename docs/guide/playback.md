@@ -12,8 +12,10 @@ desktop effects. Dry runs create no image files.
 ## Timing
 
 `defaults.character_delay_ms` controls the interval between Unicode scalar values.
-An action can override it with `interval_ms`. There is no delay after the final
-character. Use `wait` for an intentional pause between actions.
+An action can override it with `interval_ms`. Optional
+[typing profiles](/guide/typing-profiles) add seeded variation and boundary pauses.
+There is no delay after the final character, including punctuation and newlines.
+Use `wait` for an intentional pause between actions.
 
 Keystroke posting is asynchronous. Add a wait after typing or clearing a field
 before an Accessibility focus or invoke action, which can otherwise overtake

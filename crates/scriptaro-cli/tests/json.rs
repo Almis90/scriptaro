@@ -50,6 +50,45 @@ fn json(output: &Output, code: i32) -> Value {
 const SCRIPT: &str = "version: 1\ndefaults: {character_delay_ms: 17, timeout_ms: 3456}\nsteps:\n  - action: type_text\n    text: 'PRIVATE 🦀 text'\n  - action: wait\n    duration_ms: 2\n";
 
 #[test]
+fn typing_profile_plans_resolve_precedence_without_disclosing_text() {
+    let root = Scratch::new();
+    let path=root.script("version: 1\ndefaults: {character_delay_ms: 99, typing_profile: natural}\nsteps:\n - action: type_text\n   text: 'PRIVATE 🦀'\n - action: type_text\n   text: fixed\n   interval_ms: 0\n - action: type_text\n   text: custom\n   profile: {interval_ms: 60, jitter_ms: 10, line_pause_ms: 200, seed: 42}\n");
+    let output = cli().arg("plan").arg(&path).arg("--json").output().unwrap();
+    let plan = json(&output, 0);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+    let steps = &plan["data"]["steps"];
+    assert_eq!(steps[0]["characters"], 9);
+    assert_eq!(steps[0]["profile"], "natural");
+    assert_eq!(steps[0]["timing"]["interval_ms"], 45);
+    assert_eq!(steps[0]["timing"]["line_pause_ms"], 300);
+    assert_eq!(steps[1]["interval_ms"], 0);
+    assert_eq!(steps[1]["timing"]["jitter_ms"], 0);
+    assert!(steps[1]["profile"].is_null());
+    assert_eq!(steps[2]["timing"]["seed"], 42);
+    let output = cli().arg("plan").arg(&path).output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(!text.contains("PRIVATE"));
+    assert!(text.contains("jitter ±15 ms"));
+    let report = root.0.join("report.json");
+    let result = json(
+        &cli()
+            .arg("run")
+            .arg(&path)
+            .args(["--dry-run", "--json", "--report"])
+            .arg(&report)
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert_eq!(result["data"]["completed_steps"], 3);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(report).unwrap()).unwrap(),
+        result
+    );
+}
+
+#[test]
 fn paste_plans_and_reports_redact_contents_and_disclose_clipboard_policy() {
     let root = Scratch::new();
     let path = root.script("version: 2\nvariables: {message: 'PRIVATE 🦀'}\nsteps:\n - action: paste_text\n   text: '${message}'\n");

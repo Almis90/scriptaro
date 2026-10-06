@@ -232,6 +232,7 @@ fn activated(action: Action) -> Script {
         },
         action,
         Action::TypeText {
+            profile: None,
             text: "x".into(),
             interval_ms: None,
         },

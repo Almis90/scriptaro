@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 mod control;
 mod screenshot;
+mod typing;
 pub use control::{ControlState, PlaybackController};
 
 use scriptaro_core::{
@@ -788,15 +789,24 @@ impl<'a> Engine<'a> {
                 self.window_focus = None;
                 self.control_focus = None;
             }
-            Action::TypeText { text, interval_ms } => {
-                let interval =
-                    self.scaled(interval_ms.unwrap_or(script.defaults.character_delay_ms));
-                for (index, character) in text.chars().enumerate() {
-                    if index > 0 {
-                        self.delay(interval).await?;
-                    }
+            Action::TypeText {
+                text,
+                interval_ms,
+                profile,
+            } => {
+                let mut cadence = typing::Cadence::new(
+                    script
+                        .defaults
+                        .typing_timing(profile.as_ref(), *interval_ms),
+                );
+                let mut characters = text.chars().peekable();
+                while let Some(character) = characters.next() {
                     self.before_input().await?;
                     self.backend.type_character(character)?;
+                    if characters.peek().is_some() {
+                        self.delay(self.scaled(cadence.gap_after(character)))
+                            .await?;
+                    }
                 }
             }
             Action::KeyPress { key, modifiers } => {

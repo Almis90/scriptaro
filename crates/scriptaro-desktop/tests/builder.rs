@@ -22,6 +22,7 @@ fn fixtures() -> Vec<Action> {
     let mut actions = vec![
         Action::Wait { duration_ms: 123 },
         Action::TypeText {
+            profile: None,
             text: "🦀 \"hello\"\n  second\tline\n".into(),
             interval_ms: Some(0),
         },
@@ -95,6 +96,18 @@ fn set(form: &mut Form, key: &str, value: &str) {
 }
 fn flat() -> &'static str {
     "# source comment\nversion: 1\nsteps:\n  - action: wait\n    duration_ms: 1\n  - action: wait\n    duration_ms: 2\n"
+}
+
+#[test]
+fn explicit_typing_profiles_cannot_be_silently_replaced_by_legacy_forms() {
+    let script=yaml::from_str("version: 1\ndefaults: {typing_profile: natural}\nsteps: [{action: type_text, text: hello, profile: brisk}]").unwrap();
+    let form = Form::from_action(&script.steps[0]);
+    assert_eq!(form.kind, Kind::Advanced);
+    assert!(form.action().is_err());
+    assert_eq!(
+        script,
+        yaml::from_str(&yaml::to_string(&script).unwrap()).unwrap()
+    );
 }
 #[test]
 fn every_action_and_condition_round_trips_through_fields_without_losing_values() {

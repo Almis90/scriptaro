@@ -1,6 +1,6 @@
 use crate::{
     Action, AppSelector, Bounds, Condition, ControlAssertion, ControlRole, ControlSelector,
-    LaunchTarget, Script, WindowSelector,
+    LaunchTarget, Script, TypingProfile, WindowSelector,
 };
 use thiserror::Error;
 
@@ -33,6 +33,24 @@ fn duration(value: u64, location: &str, nonzero: bool) -> Result<(), ValidationE
             } else {
                 "must be at most 86400000 milliseconds"
             },
+        ));
+    }
+    Ok(())
+}
+
+fn typing(profile: &TypingProfile, location: &str) -> Result<(), ValidationError> {
+    let timing = profile.timing();
+    let pause = timing
+        .word_pause_ms
+        .max(timing.punctuation_pause_ms)
+        .max(timing.line_pause_ms);
+    if timing.jitter_ms > timing.interval_ms
+        || u128::from(timing.interval_ms) + u128::from(timing.jitter_ms) + u128::from(pause)
+            > u128::from(MAX_DURATION_MS)
+    {
+        return Err(ValidationError::at(
+            location,
+            "typing jitter must not exceed the base interval; the largest interval plus jitter and pause must not exceed 86400000 ms",
         ));
     }
     Ok(())
@@ -128,6 +146,9 @@ impl Script {
             false,
         )?;
         duration(self.defaults.timeout_ms, "defaults.timeout_ms", true)?;
+        if let Some(profile) = &self.defaults.typing_profile {
+            typing(profile, "defaults.typing_profile")?;
+        }
         let mut text_bytes = 0usize;
         for (index, step) in self.steps.iter().enumerate() {
             let location = format!("steps[{}] ({})", index + 1, step.kind());
@@ -318,7 +339,20 @@ impl Script {
                         duration(*ms, &location, true)?;
                     }
                 }
-                Action::TypeText { text, interval_ms } => {
+                Action::TypeText {
+                    text,
+                    interval_ms,
+                    profile,
+                } => {
+                    if let Some(profile) = profile {
+                        if interval_ms.is_some() {
+                            return Err(ValidationError::at(
+                                &location,
+                                "type_text accepts either profile or interval_ms, not both",
+                            ));
+                        }
+                        typing(profile, &location)?;
+                    }
                     text_bytes = text_bytes.saturating_add(text.len());
                     if text_bytes > MAX_SCRIPT_BYTES {
                         return Err(ValidationError::at(

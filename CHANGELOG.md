@@ -156,3 +156,15 @@ releases remain unpublished.
   text remains available, and cancellation never retries input or restores data.
 - Added an example that verifies the pasted field value, docs and focused
   fault-injection tests. No live clipboard/input test or guided UI work performed.
+
+### Repeatable typing profiles — 2026-10-06
+
+- Added `steady`, `natural` and `brisk` presets, custom seeded timing and optional
+  script defaults. Fixed `interval_ms` overrides preserve a uniform cadence.
+- Added bounded variation and whitespace/punctuation/line pauses between characters,
+  using existing speed, pause, cancellation and focus checks. Seed state restarts
+  for each text action, including expanded sequence calls and retakes.
+- Plans disclose resolved timing while omitting prepared text. Examples and docs
+  explain precedence, repeatability and the lack of trailing delays.
+- Added virtual-time and validation regressions; no live desktop runs or guided
+  profile forms in this milestone.

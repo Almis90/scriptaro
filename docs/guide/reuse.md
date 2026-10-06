@@ -57,6 +57,10 @@ Interpolation is supported in:
 - Window titles and control identifiers/labels.
 - Those same selectors inside readiness conditions, including section `requires`.
 
+Typing profiles work inside sequences. Each expanded `type_text` restarts its
+profile seed, so repeated calls keep the same planned gaps for the same text.
+Profiles and their numeric settings are literal configuration, not variable substitutions.
+
 Timing, coordinates, enum fields, section names and sequence names stay literal.
 Variables are strings; they do not become action names, numbers or YAML nodes.
 The compiler does not read environment variables, execute expressions, expand

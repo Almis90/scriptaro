@@ -441,6 +441,7 @@ pub(super) fn smoke(mtm: MainThreadMarker) -> Result<(), Box<dyn Error>> {
     let fixtures = [
         Action::Wait { duration_ms: 250 },
         Action::TypeText {
+            profile: None,
             text: "Quotes: \"hello\" 🦀\nnext\tline".into(),
             interval_ms: Some(20),
         },

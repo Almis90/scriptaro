@@ -65,7 +65,10 @@ permissions or `native_supported: false`. Check its data before native playback.
 A selected take includes setup and readiness; `--retake` also includes reset.
 Actions use the YAML action field names. Text assertions and `control_matches` readiness conditions replace expected
 `equals` text with its `characters` count; actual control values are never included. `type_text` replaces the prepared text
-with `characters` (Unicode scalar count) and effective `interval_ms`.
+with `characters` (Unicode scalar count), base `interval_ms`, selected `profile`
+(null for a fixed interval) and resolved `timing` including variation, boundary
+pauses and seed. See [Typing profiles](/guide/typing-profiles). Existing scripts
+keep their fixed interval; under a profile the base alone is not the full gap.
 Defaulted action timeouts are resolved to numeric `timeout_ms` values.
 
 Script results include `source_version`; validation

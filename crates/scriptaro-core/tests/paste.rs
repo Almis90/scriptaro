@@ -32,6 +32,7 @@ fn paste_compiles_literal_multiline_unicode_and_validates_limits() {
     }];
     assert!(large.validate().is_ok());
     large.steps.push(Action::TypeText {
+        profile: None,
         text: "x".into(),
         interval_ms: None,
     });

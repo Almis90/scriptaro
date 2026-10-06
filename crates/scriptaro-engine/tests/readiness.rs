@@ -39,6 +39,7 @@ fn wait(timeout_ms: u64) -> Action {
 }
 fn text() -> Action {
     Action::TypeText {
+        profile: None,
         text: "abc".into(),
         interval_ms: Some(100),
     }

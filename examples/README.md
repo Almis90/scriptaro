@@ -45,3 +45,6 @@ Simulations assume assertions pass; they cannot verify application state.
 - `paste-text.yaml`: focus a field, select all, paste prepared text and verify the
   value. Native playback replaces the clipboard and keeps the text there.
   [Paste behavior](../docs/guide/paste-text.md); dry runs do not access the clipboard.
+- `typing-profiles.yaml`: inherited/preset/custom typing rhythms with a seeded
+  cadence and a fixed-interval override. `--dry-run --realtime` keeps the delays
+  without input. [Profile rules](../docs/guide/typing-profiles.md).

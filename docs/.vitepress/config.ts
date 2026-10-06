@@ -38,6 +38,7 @@ export default defineConfig({
         { text: 'Launch and readiness', link: '/guide/launch-and-readiness' },
         { text: 'Window layout and screenshots', link: '/guide/layout-and-capture' },
         { text: 'Paste prepared text', link: '/guide/paste-text' },
+        { text: 'Typing profiles', link: '/guide/typing-profiles' },
         { text: 'Desktop interface', link: '/guide/desktop' },
         { text: 'macOS setup', link: '/guide/macos' },
       ] },

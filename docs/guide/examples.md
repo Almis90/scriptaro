@@ -116,3 +116,11 @@ waits for its exposed value to match. Replace its app/window/control selectors
 before native playback. `scriptaro run examples/paste-text.yaml --dry-run` touches
 neither clipboard nor desktop. Native paste replaces the clipboard and leaves
 the text there. See [Paste prepared text](/guide/paste-text).
+
+## Typing profiles
+
+`examples/typing-profiles.yaml` compares an inherited `natural` cadence, `brisk`,
+custom seeded timing and a fixed-interval override. Run
+`scriptaro run examples/typing-profiles.yaml --dry-run --realtime` to rehearse
+timing without input. Native playback needs a prepared scratch document and target
+actions. See [Typing profiles](/guide/typing-profiles).

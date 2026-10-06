@@ -28,6 +28,7 @@ fn focus() -> Action {
 }
 fn text() -> Action {
     Action::TypeText {
+        profile: None,
         text: "abc".into(),
         interval_ms: Some(30),
     }

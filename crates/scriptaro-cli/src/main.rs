@@ -288,11 +288,25 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                         Action::Screenshot { path, region, .. } => {
                             format!("{}; region={region:?}; PNG; no overwrite", path.display())
                         }
-                        Action::TypeText { text, interval_ms } => format!(
-                            "{} characters; {} ms between characters",
-                            text.chars().count(),
-                            interval_ms.unwrap_or(script.defaults.character_delay_ms)
-                        ),
+                        Action::TypeText {
+                            text,
+                            interval_ms,
+                            profile,
+                        } => {
+                            let timing = script
+                                .defaults
+                                .typing_timing(profile.as_ref(), *interval_ms);
+                            format!(
+                                "{} characters; base {} ms; jitter ±{} ms; pauses word={} punctuation={} line={} ms; seed={}",
+                                text.chars().count(),
+                                timing.interval_ms,
+                                timing.jitter_ms,
+                                timing.word_pause_ms,
+                                timing.punctuation_pause_ms,
+                                timing.line_pause_ms,
+                                timing.seed
+                            )
+                        }
                         Action::Wait { duration_ms } => format!("{duration_ms} ms"),
                         Action::LaunchApp { app, activate, .. } => {
                             format!("{app:?}; activate={activate}")

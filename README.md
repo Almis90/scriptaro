@@ -129,6 +129,10 @@ and **Screen Recording** access. Scripts without screenshots do not need it.
 clipboard and paste shortcut. It replaces previous clipboard contents and leaves
 the prepared text there; dry runs never access the clipboard.
 
+[`Typing profiles`](docs/guide/typing-profiles.md) add repeatable pacing to
+`type_text`: choose `steady`, `natural`, `brisk`, or custom seeded timing with
+whitespace/punctuation/line pauses. Scripts without a profile keep their old timing.
+
 - **Ctrl+C** cancels while the launching terminal is focused.
 - With **Input Monitoring** granted, hold **Control + Option + Escape** to cancel
   globally. The backend polls physical key state every 20 ms during waits and

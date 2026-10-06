@@ -82,7 +82,10 @@ pub struct Form {
 impl Kind {
     pub fn of(action: &Action) -> Self {
         match action {
-            Action::PasteText { .. }
+            Action::TypeText {
+                profile: Some(_), ..
+            }
+            | Action::PasteText { .. }
             | Action::SetWindowBounds { .. }
             | Action::Screenshot { .. }
             | Action::LaunchApp { .. }
@@ -148,6 +151,7 @@ impl Form {
             }
             Kind::Wait => Action::Wait { duration_ms: 1000 },
             Kind::TypeText => Action::TypeText {
+                profile: None,
                 text: String::new(),
                 interval_ms: None,
             },
@@ -276,7 +280,10 @@ impl Form {
             fields: vec![],
         };
         match action {
-            Action::PasteText { .. }
+            Action::TypeText {
+                profile: Some(_), ..
+            }
+            | Action::PasteText { .. }
             | Action::SetWindowBounds { .. }
             | Action::Screenshot { .. }
             | Action::LaunchApp { .. }
@@ -287,7 +294,11 @@ impl Form {
                 "Duration (milliseconds)",
                 duration_ms.to_string(),
             ),
-            Action::TypeText { text, interval_ms } => {
+            Action::TypeText {
+                text,
+                interval_ms,
+                profile: None,
+            } => {
                 form.field("text", "Prepared text", text.clone(), Widget::Multiline);
                 form.text(
                     "interval",
@@ -468,6 +479,7 @@ impl Form {
                 duration_ms: self.number("duration")?,
             },
             Kind::TypeText => Action::TypeText {
+                profile: None,
                 text: self.value("text")?.into(),
                 interval_ms: self.optional_number("interval")?,
             },

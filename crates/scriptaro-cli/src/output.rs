@@ -79,7 +79,11 @@ pub fn plan(script: &Script) -> Vec<Value> {
     script.steps.iter().enumerate().map(|(index, action)| {
         let mut value = match action {
             Action::PasteText { text, settle_ms } => json!({"action":"paste_text", "characters":text.chars().count(), "settle_ms":settle_ms,"clipboard":"replace_and_keep"}),
-            Action::TypeText { text, interval_ms } => json!({"action":"type_text", "characters":text.chars().count(), "interval_ms":interval_ms.unwrap_or(script.defaults.character_delay_ms)}),
+            Action::TypeText { text, interval_ms, profile } => {
+                let timing = script.defaults.typing_timing(profile.as_ref(), *interval_ms);
+                let effective_profile = if interval_ms.is_some() { None } else { profile.as_ref().or(script.defaults.typing_profile.as_ref()) };
+                json!({"action":"type_text", "characters":text.chars().count(), "interval_ms":timing.interval_ms,"profile":effective_profile,"timing":timing})
+            },
             _ => serde_json::to_value(action).expect("validated actions serialize"),
         };
         if let Action::AssertControl { expect: scriptaro_core::ControlAssertion::Text(text), .. } = action {
