@@ -19,6 +19,14 @@ YAML parsing is isolated in one module, so serialization can change without
 coupling playback to a parser. `thiserror` preserves structured error boundaries:
 parse/validation → preflight → indexed step failure → native cause.
 
+The version 2 authoring compiler expands variables and same-file sequence calls
+before playback. Sequence parameters belong to the compiler: arguments resolve
+in the caller's scope, then the callee receives globals plus its declared locals.
+Required values remain symbolic only during unused-definition checks; actual
+calls must bind them and pass ordinary action validation. String and action
+budgets include definition checks and argument expansion. The engine and native
+backends receive the same flat version 1 actions as before.
+
 ## Playback
 
 `Engine` borrows a `dyn DesktopBackend` and consumes itself per run. A cloned

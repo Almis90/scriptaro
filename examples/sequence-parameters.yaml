@@ -1,0 +1,44 @@
+version: 2
+name: Reusable presentation lines
+defaults:
+  typing_profile: natural
+variables:
+  topic: 'Launch planning'
+sequences:
+  line:
+    params:
+      message: null
+      ending: '.'
+    steps:
+      - action: type_text
+        text: '${message}${ending}'
+      - action: key_press
+        key: enter
+  introduction:
+    params:
+      subject: null
+    steps:
+      - action: call
+        sequence: line
+        with:
+          message: 'Welcome to ${subject}'
+          ending: '!'
+      - action: call
+        sequence: line
+        with:
+          message: 'We will walk through it together'
+sections:
+  - name: Introduction
+    # Prepare and focus a scratch document before native playback.
+    # Restore it yourself before a retake; this script does not clear contents.
+    reset: []
+    steps:
+      - action: call
+        sequence: introduction
+        with:
+          subject: '${topic}'
+      - action: call
+        sequence: line
+        with:
+          message: 'Let us begin'
+          ending: '…'

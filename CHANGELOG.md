@@ -18,6 +18,17 @@
 Source and documentation are published on GitHub. Registry packages and binary
 releases remain unpublished.
 
+### Sequence parameters — 2026-10-06
+
+- Version 2 sequences can declare required/default string `params`; calls supply
+  `with` values resolved in the caller's scope. Nested forwarding is explicit,
+  local parameters shadow globals and existing list definitions remain supported.
+- Binding is literal and nonrecursive. Missing/unknown arguments, malformed
+  definitions, recursion and expansion-budget overruns fail before playback.
+  Unused templates and all resolved calls retain validation coverage.
+- Added a CLI example, parameter guide and compiler/CLI regressions for scoping,
+  forwarding, bounds, sections, retakes and saved reports. No live desktop runs.
+
 ### Local development: controls, takes and desktop host
 
 - Portable control selectors, read-only readiness conditions, focus guards and single-dispatch button/check box invocation; macOS Accessibility implementation and CLI metadata discovery.

@@ -481,6 +481,91 @@ fn unsupported_discovery_has_json_diagnostics_instead_of_mixed_text() {
 }
 
 #[test]
+fn sequence_parameters_work_in_sections_retakes_and_content_free_reports() {
+    let scratch = Scratch::new();
+    let path = scratch.script(
+        r#"
+version: 2
+variables: {message: 'PRIVATE global'}
+sequences:
+  line:
+    params: {text: null, ending: '!'}
+    steps: [{action: type_text, text: '${text}${ending}', profile: brisk}]
+sections:
+  - name: Intro
+    reset: [{action: call, sequence: line, with: {text: 'PRIVATE reset', ending: ''}}]
+    setup: [{action: call, sequence: line, with: {text: 'PRIVATE setup', ending: ''}}]
+    steps:
+      - {action: call, sequence: line, with: {text: '${message}'}}
+      - {action: call, sequence: line, with: {text: 'PRIVATE second'}}
+"#,
+    );
+    for command in ["validate", "sections", "plan"] {
+        let output = cli()
+            .arg(command)
+            .arg(&path)
+            .args(["--json", "--var", "message=PRIVATE 🦀"])
+            .output()
+            .unwrap();
+        let value = json(&output, 0);
+        assert_eq!(value["data"]["source_version"], 2);
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+        if command == "plan" {
+            assert_eq!(value["data"]["total_steps"], 3);
+            assert_eq!(value["data"]["steps"][1]["characters"], 10);
+            assert_eq!(value["data"]["steps"][1]["profile"], "brisk");
+        }
+    }
+    let report = scratch.0.join("parameters.json");
+    let output = cli()
+        .arg("run")
+        .arg(&path)
+        .args([
+            "--dry-run",
+            "--json",
+            "--section",
+            "Intro",
+            "--retake",
+            "--report",
+        ])
+        .arg(&report)
+        .output()
+        .unwrap();
+    let value = json(&output, 0);
+    assert_eq!(value["data"]["completed_steps"], 4);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&report).unwrap()).unwrap(),
+        value
+    );
+
+    let invalid = scratch.script("version: 2\nsequences:\n  line:\n    params: {text: null}\n    steps: [{action: type_text, text: '${text}'}]\nsteps: [{action: call, sequence: line}]\n");
+    let failed = scratch.0.join("missing-parameter.json");
+    // This fails during compilation without constructing a native backend.
+    let output = cli()
+        .arg("run")
+        .arg(&invalid)
+        .args(["--json", "--report"])
+        .arg(&failed)
+        .output()
+        .unwrap();
+    let value = json(&output, 1);
+    assert_eq!(value["error"]["code"], "invalid_script");
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("missing required sequence parameter: text")
+    );
+    assert!(value["data"]["backend"].is_null());
+    assert_eq!(value["data"]["completed_steps"], 0);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&failed).unwrap()).unwrap(),
+        value
+    );
+}
+
+#[test]
 fn variables_and_sequences_work_through_plan_validation_sections_and_saved_runs() {
     let scratch = Scratch::new();
     let path = scratch.script("version: 2\nvariables: {text: null}\nsequences:\n  line: [{action: type_text, text: '${text}'}]\nsections:\n  - name: Intro\n    reset: []\n    steps: [{action: call, sequence: line}]\n");

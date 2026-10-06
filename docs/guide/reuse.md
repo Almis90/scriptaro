@@ -92,12 +92,74 @@ steps:
 ```
 
 `call` can appear in top-level steps or section setup, reset and body lists.
-Sequences can call other sequences; calls are flattened in order. All calls use
-that script's resolved variables. There are no per-call parameters or implicit
-retries. Sequence names use the same identifier rules as variable names.
+Sequences can call other sequences; calls are flattened in order. Sequences can
+read the script's resolved variables and declare their own per-call parameters.
+There are no implicit retries. Sequence names use the same identifier rules as
+variable names. Existing list definitions keep their behavior.
 
 Definitions are reusable within one source file. YAML anchors still work, but
 file imports and shared external libraries are not implemented.
+
+## Sequence parameters
+
+Use a mapping with `params` and `steps` when a sequence needs different values on
+each call. A string is a literal default; `null` marks a required parameter.
+Supply arguments in the call's `with` mapping:
+
+```yaml
+version: 2
+sequences:
+  line:
+    params:
+      message: null
+      ending: '!'
+    steps:
+      - action: type_text
+        text: '${message}${ending}'
+      - action: key_press
+        key: enter
+steps:
+  - action: call
+    sequence: line
+    with: {message: 'Hello'}
+  - action: call
+    sequence: line
+    with: {message: 'Goodbye', ending: '.'}
+```
+
+This expands to typing `Hello!`, Enter, typing `Goodbye.`, Enter. Parameters use
+the same identifier rules and supported string fields as variables. Timing,
+coordinates, profile configuration and other non-string settings stay literal.
+
+- A sequence's parameters shadow globals with the same name inside that sequence.
+- Arguments are interpolated in the **caller’s** scope before the callee's
+  parameters are bound. Sibling `with` entries cannot reference each other.
+- Nested sequences see globals and their own declared parameters. They do not
+  inherit the caller's local parameters; forward them explicitly with
+  `with: {message: '${message}'}`. Returning from a call restores the caller's scope.
+- Defaults are literal strings, just like top-level variable defaults. A default
+  of `'${topic}'` means those exact characters. To use a global or caller parameter,
+  pass `with: {message: '${topic}'}`. CLI `--var` only overrides declared globals.
+- Required parameters must be supplied on every call, even if a global has the
+  same name or the parameter is unused. Unknown arguments, duplicate names,
+  null/non-string arguments and missing required arguments fail compilation.
+- An empty string is allowed when the resolved action permits it. Parameters
+  cannot turn into YAML nodes or action names. Inserted values are never parsed
+  again, including when forwarded through multiple calls.
+
+Lists remain a shorthand for a sequence with no parameters. A mapping may omit
+`params` for the same behavior. `with: {}` is optional for calls with no arguments;
+passing arguments to an old list definition is an error.
+
+The full example combines globals, defaults, nested forwarding, typing profiles
+and a named take:
+
+<<< ../../examples/sequence-parameters.yaml
+
+```sh
+scriptaro plan examples/sequence-parameters.yaml --var 'topic=Release notes'
+scriptaro run examples/sequence-parameters.yaml --section Introduction --dry-run
+```
 
 ## Preparation, reports and limits
 
@@ -106,9 +168,18 @@ section reset. An invalid unused definition blocks playback. Unknown sequences,
 direct or indirect recursion, malformed actions and invalid resolved selectors
 are errors. Calls cannot bypass the normal action validator.
 
+An unused parameterized definition may declare required parameters without
+supplying example values. Definition checks validate its schema, placeholders,
+calls, literal fields and numeric settings using symbolic required values.
+Value-dependent constraints (such as a parameterized screenshot path's `.png`
+extension) are checked for every actual call, including calls in unselected
+sections and resets, before a backend is constructed. Parameter defaults are
+checked during definition validation even when a later call overrides them.
+
 The compiler limits nesting to 32 sequence levels and total expansion work to
 10,000 visited steps, counting calls, definition validation and the script's
-expanded action lists. Generated strings across that work are limited to 4 MiB;
+expanded action lists. Generated strings across that work, including argument
+interpolation and binding defaults, are limited to 4 MiB;
 combined resolved variable values and YAML source each have their own 4 MiB
 limit. Definition checks count toward the compilation budgets even if the
 sequence is later called again. These limits stop short recursive-looking files
@@ -118,7 +189,7 @@ from generating enormous runs. Ordinary runtime limits also apply.
 counts. Runtime progress, failure step numbers and report counts refer to this
 flattened plan. JSON output adds `source_version`; a compiled version 2 source
 has runtime `version: 1` in validation metadata. Run reports record the source
-version once compilation succeeds, without storing variable assignments.
+version once compilation succeeds, without storing variable or parameter assignments.
 
 Compilation failures produce actionable diagnostics and, when `--report` was
 reserved, a failed run report with no native backend. See

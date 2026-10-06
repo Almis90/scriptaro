@@ -48,3 +48,6 @@ Simulations assume assertions pass; they cannot verify application state.
 - `typing-profiles.yaml`: inherited/preset/custom typing rhythms with a seeded
   cadence and a fixed-interval override. `--dry-run --realtime` keeps the delays
   without input. [Profile rules](../docs/guide/typing-profiles.md).
+- `sequence-parameters.yaml`: required/default string parameters, different values
+  per call and explicit forwarding through nested sequences. Uses a global topic,
+  typing profiles and a named take. [Parameter rules](../docs/guide/reuse.md#sequence-parameters).

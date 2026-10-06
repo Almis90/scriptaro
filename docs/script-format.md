@@ -2,7 +2,8 @@
 
 The runtime action format below is version 1. The CLI also accepts
 [version 2 authoring](/guide/reuse), which adds string variables and reusable
-sequences and compiles into these same actions. Version 1 text remains literal.
+sequences with per-call string parameters and compiles into these same actions.
+Version 1 text remains literal.
 
 Version 1 YAML uses a required `version: 1` and nonempty `steps` list, plus optional `name`
 and `defaults`. Every action is a mapping with an `action` discriminator.

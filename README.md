@@ -241,7 +241,7 @@ untouched during playback. See the [trial setup and limits](docs/guide/developme
   parser is not a security sandbox for adversarial input.
 
 The CLI provides [structured output and saved run reports](docs/guide/cli-output.md),
-with actionable diagnostics for scripted workflows. String variables and reusable action sequences are available in
+with actionable diagnostics for scripted workflows. String variables and reusable action sequences with per-call parameters are available in
 [version 2 CLI scripts](docs/guide/reuse.md). Further UI
 work is deferred; the existing macOS host remains available. Broader application
 and display trials, distribution/signing, and independent Windows/X11/Wayland

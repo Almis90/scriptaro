@@ -26,7 +26,7 @@ struct Source {
     #[serde(default)]
     variables: BTreeMap<String, Value>,
     #[serde(default)]
-    sequences: BTreeMap<String, Vec<Value>>,
+    sequences: BTreeMap<String, Sequence>,
     #[serde(default)]
     steps: Vec<Value>,
     #[serde(default)]
@@ -49,6 +49,44 @@ struct SourceSection {
 struct Call {
     action: String,
     sequence: String,
+    #[serde(default, rename = "with")]
+    arguments: BTreeMap<String, Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Sequence {
+    Steps(Vec<Value>),
+    Parameterized(SequenceDefinition),
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SequenceDefinition {
+    #[serde(default)]
+    params: BTreeMap<String, Value>,
+    steps: Vec<Value>,
+}
+impl Sequence {
+    fn steps(&self) -> &[Value] {
+        match self {
+            Self::Steps(steps) => steps,
+            Self::Parameterized(definition) => &definition.steps,
+        }
+    }
+    fn params(&self) -> impl Iterator<Item = (&String, &Value)> {
+        match self {
+            Self::Steps(_) => None,
+            Self::Parameterized(definition) => Some(&definition.params),
+        }
+        .into_iter()
+        .flatten()
+    }
+    fn has_parameter(&self, name: &str) -> bool {
+        match self {
+            Self::Steps(_) => false,
+            Self::Parameterized(definition) => definition.params.contains_key(name),
+        }
+    }
 }
 fn invalid(location: &str, message: impl Into<String>) -> ScriptError {
     ValidationError::at(location, message).into()
@@ -134,27 +172,65 @@ pub fn compile(
     }
     let mut compiler = Compiler {
         variables,
+        locals: BTreeMap::new(),
         sequences: &source.sequences,
         defaults: &source.defaults,
         actions: 0,
         bytes: 0,
     };
-    // Validate every definition, including unused definitions, before producing a runnable script.
-    for (name, steps) in &source.sequences {
+    // Check declarations before expanding any references to them.
+    for (name, sequence) in &source.sequences {
         if !identifier(name) {
             return Err(invalid(
                 "sequences",
                 "names must match [A-Za-z_][A-Za-z0-9_]*",
             ));
         }
-        if steps.is_empty() {
+        if sequence.steps().is_empty() {
             return Err(invalid(
                 &format!("sequences.{name}"),
                 "sequence must contain actions",
             ));
         }
-        compiler.expand(steps, &format!("sequences.{name}"), &mut vec![name.clone()])?;
+        for (parameter, default) in sequence.params() {
+            if !identifier(parameter) {
+                return Err(invalid(
+                    &format!("sequences.{name}.params"),
+                    "names must match [A-Za-z_][A-Za-z0-9_]*",
+                ));
+            }
+            if !matches!(default, Value::String(_) | Value::Null) {
+                return Err(invalid(
+                    &format!("sequences.{name}.params.{parameter}"),
+                    "default must be a quoted string or null (required)",
+                ));
+            }
+        }
     }
+    // Required parameters are symbolic only during unused-definition checks.
+    // Every actual call must bind them before the runtime script is produced.
+    for (name, sequence) in &source.sequences {
+        compiler.locals.clear();
+        for (parameter, default) in sequence.params() {
+            // The witness preserves nonempty checks while known literal bytes
+            // (including invalid control characters) still reach validation.
+            let text = default.as_str().unwrap_or("parameter");
+            compiler.charge(text.len(), &format!("sequences.{name}.params.{parameter}"))?;
+            compiler.locals.insert(
+                parameter.clone(),
+                Binding {
+                    text: text.to_owned(),
+                    unresolved: default.is_null(),
+                },
+            );
+        }
+        compiler.expand(
+            sequence.steps(),
+            &format!("sequences.{name}"),
+            &mut vec![name.clone()],
+        )?;
+    }
+    compiler.locals.clear();
     let steps = compiler.expand(&source.steps, "steps", &mut vec![])?;
     let mut sections = Vec::new();
     for (index, section) in source.sections.iter().enumerate() {
@@ -192,17 +268,38 @@ pub fn compile(
     })
 }
 
+struct Binding {
+    text: String,
+    unresolved: bool,
+}
+
 struct Compiler<'a> {
     variables: BTreeMap<String, String>,
-    sequences: &'a BTreeMap<String, Vec<Value>>,
+    // Unresolved bindings exist only during definition checks, never in playback.
+    locals: BTreeMap<String, Binding>,
+    sequences: &'a BTreeMap<String, Sequence>,
     defaults: &'a Defaults,
     actions: usize,
     bytes: usize,
 }
 impl Compiler<'_> {
     fn text(&mut self, text: &mut String, location: &str) -> Result<(), ScriptError> {
+        self.resolve_text(text, location).map(|_| ())
+    }
+    fn charge(&mut self, bytes: usize, location: &str) -> Result<(), ScriptError> {
+        self.bytes = self.bytes.saturating_add(bytes);
+        if self.bytes > MAX_SCRIPT_BYTES {
+            return Err(invalid(
+                location,
+                "expanded strings exceed the 4 MiB compilation budget",
+            ));
+        }
+        Ok(())
+    }
+    fn resolve_text(&mut self, text: &mut String, location: &str) -> Result<bool, ScriptError> {
         let mut result = String::new();
         let mut rest = text.as_str();
+        let mut unresolved = false;
         while !rest.is_empty() {
             let (part, consumed) = if rest.starts_with("$${") {
                 ("${", 3)
@@ -214,10 +311,20 @@ impl Compiler<'_> {
                     )
                 })?;
                 let name = &after[..end];
-                let value = self.variables.get(name).ok_or_else(|| {
-                    invalid(location, format!("unknown variable placeholder: {name}"))
-                })?;
-                (value.as_str(), end + 3)
+                let value = match self.locals.get(name) {
+                    Some(value) => {
+                        unresolved |= value.unresolved;
+                        value.text.as_str()
+                    }
+                    None => self
+                        .variables
+                        .get(name)
+                        .map(String::as_str)
+                        .ok_or_else(|| {
+                            invalid(location, format!("unknown variable placeholder: {name}"))
+                        })?,
+                };
+                (value, end + 3)
             } else {
                 let end = rest
                     .char_indices()
@@ -226,18 +333,20 @@ impl Compiler<'_> {
                     .map_or(rest.len(), |(i, _)| i);
                 (&rest[..end], end)
             };
-            self.bytes = self.bytes.saturating_add(part.len());
-            if self.bytes > MAX_SCRIPT_BYTES {
+            // Charge before allocation. The value may borrow this compiler.
+            let bytes = self.bytes.saturating_add(part.len());
+            if bytes > MAX_SCRIPT_BYTES {
                 return Err(invalid(
                     location,
                     "expanded strings exceed the 4 MiB compilation budget",
                 ));
             }
+            self.bytes = bytes;
             result.push_str(part);
             rest = &rest[consumed..];
         }
         *text = result;
-        Ok(())
+        Ok(unresolved)
     }
     fn app(&mut self, app: &mut AppSelector, at: &str) -> Result<(), ScriptError> {
         match app {
@@ -282,7 +391,11 @@ impl Compiler<'_> {
             Action::SetWindowBounds { window, .. } => self.window(window, at)?,
             Action::Screenshot { path, .. } => {
                 let mut text = path.to_string_lossy().into_owned();
-                self.text(&mut text, at)?;
+                if self.resolve_text(&mut text, at)? && !text.contains('\0') {
+                    // Its extension depends on an unbound parameter; defer only
+                    // this field's value validation until an actual call binds it.
+                    text = "parameter.png".into();
+                }
                 *path = text.into();
             }
             Action::LaunchApp { app, .. } => match app {
@@ -360,13 +473,50 @@ impl Compiler<'_> {
                 let sequence = self.sequences.get(&call.sequence).ok_or_else(|| {
                     invalid(&location, format!("unknown sequence: {}", call.sequence))
                 })?;
+                for name in call.arguments.keys() {
+                    if !sequence.has_parameter(name) {
+                        return Err(invalid(
+                            &location,
+                            format!("unknown sequence parameter: {name}"),
+                        ));
+                    }
+                }
+                let mut locals = BTreeMap::new();
+                for (name, default) in sequence.params() {
+                    let argument_at = format!("{location}.with.{name}");
+                    let value = if let Some(argument) = call.arguments.get(name) {
+                        let mut text = argument
+                            .as_str()
+                            .ok_or_else(|| {
+                                invalid(&argument_at, "argument must be a quoted string")
+                            })?
+                            .to_owned();
+                        let unresolved = self.resolve_text(&mut text, &argument_at)?;
+                        Binding { text, unresolved }
+                    } else if let Some(default) = default.as_str() {
+                        self.charge(default.len(), &argument_at)?;
+                        Binding {
+                            text: default.to_owned(),
+                            unresolved: false,
+                        }
+                    } else {
+                        return Err(invalid(
+                            &location,
+                            format!("missing required sequence parameter: {name}"),
+                        ));
+                    };
+                    locals.insert(name.clone(), value);
+                }
+                let previous = std::mem::replace(&mut self.locals, locals);
                 stack.push(call.sequence.clone());
-                result.extend(self.expand(
-                    sequence,
+                let expanded = self.expand(
+                    sequence.steps(),
                     &format!("{location} -> {}", call.sequence),
                     stack,
-                )?);
+                );
                 stack.pop();
+                self.locals = previous;
+                result.extend(expanded?);
             } else {
                 let mut action: Action = serde_yaml::from_value(value.clone())
                     .map_err(|e| invalid(&location, e.to_string()))?;

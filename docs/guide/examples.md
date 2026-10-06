@@ -78,6 +78,10 @@ two named takes. Rehearse without desktop input:
 scriptaro run examples/reusable.yaml --section Introduction --dry-run --var 'topic=Launch planning'
 ```
 
+`examples/sequence-parameters.yaml` adds required/default string parameters and
+per-call values with explicit forwarding through nested sequences. Rehearse with
+`scriptaro run examples/sequence-parameters.yaml --dry-run --var 'topic=Release notes'`.
+
 See [Variables and reusable sequences](/guide/reuse) for the complete example
 and CLI override rules.
 
