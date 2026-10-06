@@ -34,6 +34,8 @@ pause immediately. Pausing does not undo an OS request already sent.
 | `wait` | `duration_ms` | — |
 | `wait_until` | `condition` | `timeout_ms` |
 | `launch_app` | `app` (identifier or path) | `activate` (`true`), `timeout_ms` |
+| `set_window_bounds` | `window`, `bounds` (`x`, `y`, `width`, `height`) | `timeout_ms` |
+| `screenshot` | `path` (`.png`, no overwrite) | `region` (`x`, `y`, `width`, `height`), `timeout_ms` |
 | `activate_app` | `app` | `timeout_ms` |
 | `activate_window` | `window` | `timeout_ms` |
 | `open_file` | `path` | `app`, `timeout_ms` |
@@ -64,6 +66,10 @@ the actual returned process, even if a different instance was requested.
 
 Use [`launch_app`](/guide/launch-and-readiness) to start an installed application
 or a specific application bundle, then wait for its readiness.
+
+Use [`set_window_bounds` and `screenshot`](/guide/layout-and-capture) for repeatable
+window layouts and PNG checkpoints. Native screenshots require macOS 15.2+ and
+Screen Recording permission; other actions retain their existing requirements.
 
 `activate_app` only activates a running app, then waits for it to become frontmost.
 Activation refusal, ambiguity, disappearance, and timeout are errors. No action

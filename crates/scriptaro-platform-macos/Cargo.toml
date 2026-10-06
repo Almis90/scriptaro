@@ -13,7 +13,7 @@ scriptaro-platform.workspace = true
 tokio.workspace = true
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSRunningApplication", "block2", "libc"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString", "NSURL", "NSError"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString", "NSURL", "NSError", "NSGeometry"] }
 block2 = "0.6"
 core-graphics = { version = "0.25", features = ["highsierra"] }
 core-foundation = "0.10"

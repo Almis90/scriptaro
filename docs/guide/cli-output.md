@@ -1,5 +1,10 @@
 # CLI output and reports
 
+Plans for `set_window_bounds` and `screenshot` include selectors, geometry, paths
+and effective timeouts. Screenshot steps in `mode: simulation` create no PNG files;
+completed simulated steps do not prove captures exist. Reports never embed image
+bytes. See [Window layout and screenshots](/guide/layout-and-capture).
+
 Use `--json` to consume Scriptaro from another program. Use `run --report PATH`
 to keep a result independently of terminal output. Both work in simulation and
 desktop playback; neither changes the sequence or retries failed actions.

@@ -4,7 +4,7 @@ use crate::{
     PendingOpen, WindowTarget,
 };
 use scriptaro_core::{
-    AppSelector, Condition, ControlAssertion, ControlSelector, Key, LaunchTarget, Modifier,
+    AppSelector, Bounds, Condition, ControlAssertion, ControlSelector, Key, LaunchTarget, Modifier,
     MouseButton, Point, WindowSelector,
 };
 use std::{
@@ -15,6 +15,8 @@ use std::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
+    SetWindowBounds(WindowSelector, Bounds),
+    Screenshot(Option<Bounds>),
     Launch(LaunchTarget, bool),
     AssertControl(ControlSelector, ControlAssertion),
     BeginDrag(Point, MouseButton),
@@ -33,6 +35,7 @@ pub enum Operation {
 
 #[derive(Default)]
 pub struct RecordingBackend {
+    pub geometry: Option<Bounds>,
     pub operations: Vec<Operation>,
     pub pointer: Rc<Cell<Point>>,
     pub drag_events: Rc<RefCell<Vec<DragEvent>>>,
@@ -48,6 +51,8 @@ impl DesktopBackend for RecordingBackend {
     }
     fn capabilities(&self) -> &'static [Capability] {
         &[
+            Capability::WindowBounds,
+            Capability::Screenshot,
             Capability::Applications,
             Capability::Launch,
             Capability::OpenFile,
@@ -114,6 +119,28 @@ impl DesktopBackend for RecordingBackend {
             self.active_window.as_ref() == Some(window)
                 && self.active.as_ref() == Some(&window.app),
         )
+    }
+    fn set_window_bounds(
+        &mut self,
+        window: &WindowSelector,
+        bounds: Bounds,
+    ) -> BackendResult<Option<WindowTarget>> {
+        self.operations
+            .push(Operation::SetWindowBounds(window.clone(), bounds));
+        self.geometry = Some(bounds);
+        Ok(Some(WindowTarget {
+            app: window.app.clone(),
+            id: self.operations.len() as u64,
+        }))
+    }
+    fn window_bounds(&mut self, _: &WindowTarget) -> BackendResult<Bounds> {
+        self.geometry
+            .ok_or_else(|| crate::BackendError::Native("no simulated window geometry".into()))
+    }
+    fn screenshot(&mut self, region: Option<Bounds>) -> BackendResult<crate::PendingScreenshot> {
+        self.operations.push(Operation::Screenshot(region));
+        // Simulation never manufactures an image or writes an output file.
+        Ok(Box::pin(async { Ok(Vec::new()) }))
     }
     fn focus_control(&mut self, control: &ControlSelector) -> BackendResult<Option<ControlTarget>> {
         let window = self

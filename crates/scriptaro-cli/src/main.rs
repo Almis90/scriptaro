@@ -278,6 +278,12 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                 for (index, action) in script.steps.iter().enumerate() {
                     use scriptaro_core::Action;
                     let detail = match action {
+                        Action::SetWindowBounds { window, bounds, .. } => {
+                            format!("{window:?}; {bounds:?}")
+                        }
+                        Action::Screenshot { path, region, .. } => {
+                            format!("{}; region={region:?}; PNG; no overwrite", path.display())
+                        }
                         Action::TypeText { text, interval_ms } => format!(
                             "{} characters; {} ms between characters",
                             text.chars().count(),

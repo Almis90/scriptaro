@@ -1,6 +1,6 @@
 use crate::{
-    Action, AppSelector, Condition, ControlAssertion, ControlRole, ControlSelector, LaunchTarget,
-    Script, WindowSelector,
+    Action, AppSelector, Bounds, Condition, ControlAssertion, ControlRole, ControlSelector,
+    LaunchTarget, Script, WindowSelector,
 };
 use thiserror::Error;
 
@@ -33,6 +33,24 @@ fn duration(value: u64, location: &str, nonzero: bool) -> Result<(), ValidationE
             } else {
                 "must be at most 86400000 milliseconds"
             },
+        ));
+    }
+    Ok(())
+}
+
+fn bounds(value: &Bounds, location: &str) -> Result<(), ValidationError> {
+    if ![value.x, value.y, value.width, value.height]
+        .iter()
+        .all(|n| n.is_finite())
+        || value.x.abs() > 1_000_000.0
+        || value.y.abs() > 1_000_000.0
+        || !(1.0..=16384.0).contains(&value.width)
+        || !(1.0..=16384.0).contains(&value.height)
+        || value.width * value.height > 64_000_000.0
+    {
+        return Err(ValidationError::at(
+            location,
+            "bounds need finite coordinates within ±1000000, dimensions 1..16384 and area at most 64000000 logical square points",
         ));
     }
     Ok(())
@@ -114,6 +132,42 @@ impl Script {
         for (index, step) in self.steps.iter().enumerate() {
             let location = format!("steps[{}] ({})", index + 1, step.kind());
             match step {
+                Action::SetWindowBounds {
+                    window: selector,
+                    bounds: value,
+                    timeout_ms,
+                } => {
+                    window(selector, &location)?;
+                    bounds(value, &location)?;
+                    if let Some(ms) = timeout_ms {
+                        duration(*ms, &location, true)?;
+                    }
+                }
+                Action::Screenshot {
+                    path,
+                    region,
+                    timeout_ms,
+                } => {
+                    if path
+                        .to_str()
+                        .is_none_or(|s| s.is_empty() || s.contains('\0'))
+                        || path
+                            .extension()
+                            .and_then(|s| s.to_str())
+                            .is_none_or(|s| !s.eq_ignore_ascii_case("png"))
+                    {
+                        return Err(ValidationError::at(
+                            &location,
+                            "screenshot path must be nonempty UTF-8 without NUL and end in .png",
+                        ));
+                    }
+                    if let Some(value) = region {
+                        bounds(value, &location)?;
+                    }
+                    if let Some(ms) = timeout_ms {
+                        duration(*ms, &location, true)?;
+                    }
+                }
                 Action::AssertControl {
                     control: selector,
                     expect,

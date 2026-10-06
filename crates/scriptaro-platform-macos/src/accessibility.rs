@@ -7,7 +7,8 @@ use core_foundation::{
     number::CFNumber,
     string::{CFString, CFStringRef},
 };
-use scriptaro_core::{ControlRole, ControlSelector};
+use core_graphics::geometry::{CGPoint, CGSize};
+use scriptaro_core::{Bounds, ControlRole, ControlSelector};
 use scriptaro_platform::{BackendError, BackendResult, ControlInfo};
 use std::{
     ptr,
@@ -45,6 +46,10 @@ unsafe extern "C" {
     ) -> i32;
     fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> i32;
     fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, seconds: f32) -> i32;
+    fn AXValueCreate(kind: u32, value: *const std::ffi::c_void) -> CFTypeRef;
+    fn AXValueGetTypeID() -> CFTypeID;
+    fn AXValueGetType(value: CFTypeRef) -> u32;
+    fn AXValueGetValue(value: CFTypeRef, kind: u32, output: *mut std::ffi::c_void) -> u8;
 }
 
 fn native(message: impl Into<String>) -> BackendError {
@@ -74,6 +79,121 @@ fn check(code: i32, operation: &str) -> BackendResult<()> {
 pub(crate) struct Element(CFType);
 
 impl Element {
+    pub(crate) fn bounds(&self) -> BackendResult<Bounds> {
+        let position = self
+            .attribute("AXPosition")?
+            .ok_or_else(|| native("window has no position"))?;
+        let size = self
+            .attribute("AXSize")?
+            .ok_or_else(|| native("window has no size"))?;
+        let mut point = CGPoint::new(0.0, 0.0);
+        let mut dimensions = CGSize::new(0.0, 0.0);
+        // SAFETY: verify CF and AX value types before copying into SDK-compatible
+        // CGPoint/CGSize storage. Both CF values stay retained throughout.
+        unsafe {
+            if position.type_of() != AXValueGetTypeID()
+                || size.type_of() != AXValueGetTypeID()
+                || AXValueGetType(position.as_CFTypeRef()) != 1
+                || AXValueGetType(size.as_CFTypeRef()) != 2
+                || AXValueGetValue(
+                    position.as_CFTypeRef(),
+                    1,
+                    (&mut point as *mut CGPoint).cast(),
+                ) == 0
+                || AXValueGetValue(
+                    size.as_CFTypeRef(),
+                    2,
+                    (&mut dimensions as *mut CGSize).cast(),
+                ) == 0
+            {
+                return Err(native(
+                    "window geometry has an unexpected Accessibility type",
+                ));
+            }
+        }
+        let bounds = Bounds {
+            x: point.x,
+            y: point.y,
+            width: dimensions.width,
+            height: dimensions.height,
+        };
+        if ![bounds.x, bounds.y, bounds.width, bounds.height]
+            .iter()
+            .all(|n| n.is_finite())
+            || bounds.width <= 0.0
+            || bounds.height <= 0.0
+        {
+            return Err(native("window returned invalid geometry"));
+        }
+        Ok(bounds)
+    }
+
+    pub(crate) fn set_bounds(&self, bounds: Bounds) -> BackendResult<()> {
+        for name in ["AXMinimized", "AXFullScreen"] {
+            if let Some(value) = self.read_attribute(name, true)? {
+                let state = value
+                    .downcast::<CFBoolean>()
+                    .ok_or_else(|| native("window state is not a boolean"))?;
+                if bool::from(state) {
+                    return Err(native(
+                        "restore the window from minimized/fullscreen before setting bounds",
+                    ));
+                }
+            }
+        }
+        self.bounds()?; // Verify geometry is readable before the first effect.
+        let position = CFString::new("AXPosition");
+        let size = CFString::new("AXSize");
+        for attribute in [&position, &size] {
+            let mut settable = 0u8;
+            check(
+                // SAFETY: retained typed CF/AX inputs and writable SDK Boolean output.
+                unsafe {
+                    AXUIElementIsAttributeSettable(
+                        self.0.as_CFTypeRef(),
+                        attribute.as_concrete_TypeRef(),
+                        &mut settable,
+                    )
+                },
+                "query window geometry writability",
+            )?;
+            if settable == 0 {
+                return Err(native("window position and size must both be writable"));
+            }
+        }
+        let point = CGPoint::new(bounds.x, bounds.y);
+        let dimensions = CGSize::new(bounds.width, bounds.height);
+        // SAFETY: AX kinds 1/2 are CGPoint/CGSize; Create copies these SDK values.
+        let raw_position = unsafe { AXValueCreate(1, (&point as *const CGPoint).cast()) };
+        if raw_position.is_null() {
+            return Err(native("could not allocate window position"));
+        }
+        // SAFETY: owned non-null Create result.
+        let position_value = unsafe { CFType::wrap_under_create_rule(raw_position) };
+        // SAFETY: kind 2 copies the supplied CGSize.
+        let raw_size = unsafe { AXValueCreate(2, (&dimensions as *const CGSize).cast()) };
+        if raw_size.is_null() {
+            return Err(native("could not allocate window size"));
+        }
+        // SAFETY: owned non-null Create result.
+        let size_value = unsafe { CFType::wrap_under_create_rule(raw_size) };
+        // Allocate and validate both before mutation; each attribute is set once.
+        for (attribute, value) in [(&size, &size_value), (&position, &position_value)] {
+            check(
+                // SAFETY: live AX element and typed attribute/value pairs retained above.
+                unsafe {
+                    AXUIElementSetAttributeValue(
+                        self.0.as_CFTypeRef(),
+                        attribute.as_concrete_TypeRef(),
+                        value.as_CFTypeRef(),
+                    )
+                },
+                "set window bounds (partial changes may remain)",
+            )?;
+        }
+        Ok(())
+    }
+
     fn from_cf(value: CFType) -> BackendResult<Self> {
         // SAFETY: type-ID lookup takes no arguments and owns no resources.
         if value.type_of() != unsafe { AXUIElementGetTypeID() } {

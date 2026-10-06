@@ -50,6 +50,42 @@ fn json(output: &Output, code: i32) -> Value {
 const SCRIPT: &str = "version: 1\ndefaults: {character_delay_ms: 17, timeout_ms: 3456}\nsteps:\n  - action: type_text\n    text: 'PRIVATE 🦀 text'\n  - action: wait\n    duration_ms: 2\n";
 
 #[test]
+fn geometry_and_screenshot_plans_are_explicit_and_dry_runs_create_no_image() {
+    let root = Scratch::new();
+    let source = "version: 2\nvariables: {output: 'shot.png'}\nsteps:\n - action: set_window_bounds\n   window: {app: {by: name, value: Demo}, title: Scratch}\n   bounds: {x: -30, y: 20, width: 800, height: 600}\n - action: screenshot\n   path: '${output}'\n";
+    let path = root.script(source);
+    let plan = json(
+        &cli().arg("plan").arg(&path).arg("--json").output().unwrap(),
+        0,
+    );
+    assert_eq!(plan["data"]["steps"][0]["bounds"]["x"], -30.0);
+    assert_eq!(plan["data"]["steps"][1]["path"], "shot.png");
+    assert_eq!(plan["data"]["steps"][1]["timeout_ms"], 5000);
+    assert_eq!(
+        plan["data"]["required_capabilities"],
+        serde_json::json!(["windows", "window_bounds", "screenshot"])
+    );
+    let report = root.0.join("report.json");
+    let result = json(
+        &cli()
+            .arg("run")
+            .arg(&path)
+            .args(["--dry-run", "--json", "--report"])
+            .arg(&report)
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert_eq!(result["data"]["completed_steps"], 2);
+    assert_eq!(result["data"]["mode"], "simulation");
+    assert!(!root.0.join("shot.png").exists());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(report).unwrap()).unwrap(),
+        result
+    );
+}
+
+#[test]
 fn json_commands_are_single_documents_and_plans_redact_text() {
     let scratch = Scratch::new();
     let path = scratch.script(SCRIPT);

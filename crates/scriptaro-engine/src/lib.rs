@@ -1,17 +1,18 @@
 //! Sequential playback with interruptible timing and observable progress.
 #![forbid(unsafe_code)]
 mod control;
+mod screenshot;
 pub use control::{ControlState, PlaybackController};
 
 use scriptaro_core::{
-    Action, AppSelector, Condition, ControlSelector, LaunchTarget, Point, Script, ValidationError,
-    WindowSelector,
+    Action, AppSelector, Bounds, Condition, ControlSelector, LaunchTarget, Point, Script,
+    ValidationError, WindowSelector,
 };
 use scriptaro_platform::{
-    BackendError, ControlTarget, DesktopBackend, DragSession, PendingOpen, WindowTarget,
+    BackendError, BackendResult, ControlTarget, DesktopBackend, DragSession, WindowTarget,
     required_capabilities,
 };
-use std::{path::PathBuf, time::Duration};
+use std::{collections::HashSet, future::Future, path::PathBuf, pin::Pin, time::Duration};
 use thiserror::Error;
 use tokio::{
     sync::{broadcast, watch},
@@ -19,6 +20,17 @@ use tokio::{
 };
 
 const TICK: Duration = Duration::from_millis(20);
+
+fn bounds_match(actual: Bounds, expected: Bounds) -> bool {
+    [
+        actual.x - expected.x,
+        actual.y - expected.y,
+        actual.width - expected.width,
+        actual.height - expected.height,
+    ]
+    .iter()
+    .all(|difference| difference.is_finite() && difference.abs() <= 1.0)
+}
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -173,7 +185,22 @@ impl<'a> Engine<'a> {
             .map_err(EngineError::Preflight)?;
         // Catch missing files before activating any apps. Simulation allows draft paths.
         if !self.backend.is_simulated() {
+            let mut screenshots = HashSet::new();
             for step in &script.steps {
+                if let Action::Screenshot { path, .. } = step {
+                    let resolved = screenshot::destination(&self.options.base_dir.join(path))
+                        .map_err(|e| {
+                            EngineError::Preflight(BackendError::Native(format!(
+                                "screenshot output {}: {e}",
+                                path.display()
+                            )))
+                        })?;
+                    if !screenshots.insert(resolved) {
+                        return Err(EngineError::Preflight(BackendError::Native(
+                            "duplicate screenshot destination in prepared take".into(),
+                        )));
+                    }
+                }
                 if let Action::LaunchApp {
                     app: LaunchTarget::Path(path),
                     ..
@@ -337,12 +364,12 @@ impl<'a> Engine<'a> {
         }
     }
 
-    async fn await_application(
+    async fn await_native<T>(
         &mut self,
-        mut pending: PendingOpen,
+        mut pending: Pin<Box<dyn Future<Output = BackendResult<T>>>>,
         deadline: Instant,
         operation: &'static str,
-    ) -> Result<AppSelector, StepError> {
+    ) -> Result<T, StepError> {
         loop {
             self.checkpoint().await?;
             if Instant::now() >= deadline {
@@ -584,6 +611,67 @@ impl<'a> Engine<'a> {
 
     async fn execute(&mut self, action: &Action, script: &Script) -> Result<(), StepError> {
         match action {
+            Action::SetWindowBounds {
+                window,
+                bounds,
+                timeout_ms,
+            } => {
+                let timeout_ms = timeout_ms.unwrap_or(script.defaults.timeout_ms);
+                let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+                let target = loop {
+                    self.checkpoint().await?;
+                    Self::check_deadline(deadline, "window_exists", timeout_ms)?;
+                    if let Some(target) = self.backend.set_window_bounds(window, *bounds)? {
+                        break target;
+                    }
+                    self.poll_again(deadline).await;
+                };
+                loop {
+                    self.checkpoint().await?;
+                    Self::check_deadline(deadline, "window_bounds", timeout_ms)?;
+                    let actual = self.backend.window_bounds(&target)?;
+                    Self::check_deadline(deadline, "window_bounds", timeout_ms)?;
+                    if bounds_match(actual, *bounds)
+                        && self.controller.state() == ControlState::Running
+                    {
+                        break;
+                    }
+                    self.poll_again(deadline).await;
+                }
+            }
+            Action::Screenshot {
+                path,
+                region,
+                timeout_ms,
+            } => {
+                let deadline = Instant::now()
+                    + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
+                let output = if self.backend.is_simulated() {
+                    None
+                } else {
+                    Some(
+                        screenshot::Output::prepare(&self.options.base_dir.join(path)).map_err(
+                            |e| {
+                                BackendError::Native(format!(
+                                    "prepare screenshot {}: {e}",
+                                    path.display()
+                                ))
+                            },
+                        )?,
+                    )
+                };
+                self.checkpoint().await?;
+                if Instant::now() >= deadline {
+                    return Err(StepError::Timeout("screenshot"));
+                }
+                let pending = self.backend.screenshot(*region)?;
+                let png = self.await_native(pending, deadline, "screenshot").await?;
+                if let Some(output) = output {
+                    output.finish(&png).map_err(|e| {
+                        BackendError::Native(format!("save screenshot {}: {e}", path.display()))
+                    })?;
+                }
+            }
             Action::LaunchApp {
                 app,
                 activate,
@@ -599,7 +687,7 @@ impl<'a> Engine<'a> {
                 };
                 let pending = self.backend.launch_app(&target, *activate)?;
                 let target = self
-                    .await_application(pending, deadline, "application launch")
+                    .await_native(pending, deadline, "application launch")
                     .await?;
                 loop {
                     self.checkpoint().await?;
@@ -685,9 +773,7 @@ impl<'a> Engine<'a> {
                     + Duration::from_millis(timeout_ms.unwrap_or(script.defaults.timeout_ms));
                 let path = self.options.base_dir.join(path);
                 let pending = self.backend.open_file(&path, app.as_ref())?;
-                let target = self
-                    .await_application(pending, deadline, "file open")
-                    .await?;
+                let target = self.await_native(pending, deadline, "file open").await?;
                 self.ready(&target, deadline).await?;
                 self.focus = Some(target);
                 self.window_focus = None;

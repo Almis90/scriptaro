@@ -56,6 +56,8 @@ impl Outcome {
 
 pub fn capability(capability: &Capability) -> &'static str {
     match capability {
+        Capability::WindowBounds => "window_bounds",
+        Capability::Screenshot => "screenshot",
         Capability::Applications => "applications",
         Capability::Launch => "launch",
         Capability::OpenFile => "open_file",

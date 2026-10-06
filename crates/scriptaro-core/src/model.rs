@@ -185,9 +185,33 @@ impl ControlAssertion {
     }
 }
 
+/// Logical desktop coordinates, with origin at the primary display's top left.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Bounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    SetWindowBounds {
+        window: WindowSelector,
+        bounds: Bounds,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
+    Screenshot {
+        path: PathBuf,
+        /// None captures the primary display. PNG output, never overwrite.
+        #[serde(default)]
+        region: Option<Bounds>,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
     LaunchApp {
         app: LaunchTarget,
         #[serde(default = "yes")]
@@ -284,6 +308,8 @@ impl Action {
     /// Stable name for logs and events; deliberately excludes user content.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::SetWindowBounds { .. } => "set_window_bounds",
+            Self::Screenshot { .. } => "screenshot",
             Self::LaunchApp { .. } => "launch_app",
             Self::AssertControl { .. } => "assert_control",
             Self::MouseDrag { .. } => "mouse_drag",

@@ -1,0 +1,16 @@
+version: 2
+name: Arrange a window and capture a checkpoint
+variables:
+  app: 'REPLACE_WITH_APP_IDENTIFIER'
+  window: 'REPLACE_WITH_EXACT_WINDOW_TITLE'
+  output: 'checkpoint.png'
+steps:
+  - action: set_window_bounds
+    window:
+      app: {by: identifier, value: '${app}'}
+      title: '${window}'
+    bounds: {x: 80, y: 80, width: 1000, height: 700}
+    timeout_ms: 5000
+  - action: screenshot
+    path: '${output}'
+    timeout_ms: 10000

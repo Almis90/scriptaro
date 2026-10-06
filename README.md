@@ -122,6 +122,9 @@ launching terminal as macOS identifies it in **System Settings → Privacy &
 Security → Accessibility**. Restart after changing permissions. There is no
 automatic permission prompt or AppleScript dependency.
 
+[`screenshot`](docs/guide/layout-and-capture.md) additionally requires macOS 15.2+
+and **Screen Recording** access. Scripts without screenshots do not need it.
+
 - **Ctrl+C** cancels while the launching terminal is focused.
 - With **Input Monitoring** granted, hold **Control + Option + Escape** to cancel
   globally. The backend polls physical key state every 20 ms during waits and
@@ -199,8 +202,9 @@ untouched during playback. See the [trial setup and limits](docs/guide/developme
 - macOS is the only live backend. Windows/Linux return explicit unsupported
   errors for native actions. Validation, dry runs, and engine tests are portable.
 - Native macOS APIs require a logged-in desktop session outside App Sandbox.
-  The APIs used require macOS 10.15+, while the effective OS minimum also depends
-  on the Rust target/toolchain used to build the executable.
+  Most APIs used require macOS 10.15+; screenshots require macOS 15.2+ and are
+  checked at runtime. The effective OS minimum also depends on the Rust
+  target/toolchain used to build the executable.
 - Text is emitted one Unicode scalar at a time. Newline and tab emit actual
   Enter/Tab key events. Some applications, secure fields, or input methods may
   ignore synthetic/Unicode events. Shortcuts use physical US key positions.

@@ -2,6 +2,8 @@
 #[cfg(target_os = "macos")]
 mod accessibility;
 #[cfg(target_os = "macos")]
+mod capture;
+#[cfg(target_os = "macos")]
 mod ffi;
 #[cfg(target_os = "macos")]
 mod keyboard;

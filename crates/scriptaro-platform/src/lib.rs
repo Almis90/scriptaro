@@ -4,7 +4,7 @@
 pub mod recording;
 
 use scriptaro_core::{
-    Action, AppSelector, Condition, ControlAssertion, ControlRole, ControlSelector, Key,
+    Action, AppSelector, Bounds, Condition, ControlAssertion, ControlRole, ControlSelector, Key,
     LaunchTarget, Modifier, MouseButton, Point, WindowSelector,
 };
 use std::{future::Future, path::Path, pin::Pin};
@@ -12,6 +12,8 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
+    WindowBounds,
+    Screenshot,
     Applications,
     Launch,
     OpenFile,
@@ -54,6 +56,9 @@ pub type BackendResult<T> = Result<T, BackendError>;
 pub type PendingOpen = Pin<Box<dyn Future<Output = BackendResult<AppSelector>>>>;
 /// One dispatched launch request. Dropping it stops waiting, not an OS launch.
 pub type PendingLaunch = PendingOpen;
+/// Capture resolves to PNG bytes in memory. Backends must never write output paths.
+/// Dropping this future stops waiting; a native capture may still finish in memory.
+pub type PendingScreenshot = Pin<Box<dyn Future<Output = BackendResult<Vec<u8>>>>>;
 
 #[derive(Debug, Clone)]
 pub struct PermissionStatus {
@@ -199,6 +204,24 @@ pub trait DesktopBackend {
     fn is_window_active(&mut self, _window: &WindowTarget) -> BackendResult<bool> {
         Err(self.unsupported(Capability::Windows))
     }
+    /// Resolve uniquely and dispatch size/position once, without activation.
+    /// None means absent and guarantees no changes were attempted. Errors may
+    /// leave partial geometry changes; callers must not retry a dispatched request.
+    fn set_window_bounds(
+        &mut self,
+        _window: &WindowSelector,
+        _bounds: Bounds,
+    ) -> BackendResult<Option<WindowTarget>> {
+        Err(self.unsupported(Capability::WindowBounds))
+    }
+    /// Observe the retained window identity, never reselect by title.
+    fn window_bounds(&mut self, _window: &WindowTarget) -> BackendResult<Bounds> {
+        Err(self.unsupported(Capability::WindowBounds))
+    }
+    /// Capture the primary display (None) or a desktop region. No focus changes.
+    fn screenshot(&mut self, _region: Option<Bounds>) -> BackendResult<PendingScreenshot> {
+        Err(self.unsupported(Capability::Screenshot))
+    }
     fn list_controls(&mut self, _window: &WindowSelector) -> BackendResult<Vec<ControlInfo>> {
         Err(self.unsupported(Capability::Controls))
     }
@@ -280,6 +303,8 @@ pub fn required_capabilities(actions: &[Action]) -> Vec<Capability> {
     let mut required = Vec::new();
     for action in actions {
         let capabilities: &[Capability] = match action {
+            Action::SetWindowBounds { .. } => &[Capability::Windows, Capability::WindowBounds],
+            Action::Screenshot { .. } => &[Capability::Screenshot],
             Action::LaunchApp { activate: true, .. } => {
                 &[Capability::Launch, Capability::FocusQuery]
             }

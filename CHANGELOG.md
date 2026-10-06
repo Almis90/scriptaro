@@ -131,3 +131,16 @@ releases remain unpublished.
   text from plans, and added examples, documentation and focused regression tests.
 - No new live desktop runs; native application compatibility remains to be checked
   in the intended target app.
+
+### Window layout and PNG checkpoints — 2026-10-06
+
+- Added `set_window_bounds` with exact selectors, logical desktop coordinates,
+  one-time size/position requests and bounded verification of retained windows.
+- Added `screenshot` for the primary display or a region, using ScreenCaptureKit
+  on macOS 15.2+ and in-memory ImageIO PNG encoding. Screen Recording access is
+  required only for scripts that capture screenshots.
+- Added preflight output-path checks and atomic publication without overwriting
+  existing files. Dry runs create no images; cancellation cleans up staging.
+- Added CLI plans, version 2 path/selector interpolation, examples and docs.
+  Verification uses simulated/fault-injection tests and a synthetic image;
+  no live desktop runs or guided UI changes in this milestone.

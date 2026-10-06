@@ -38,3 +38,7 @@ Simulations assume assertions pass; they cannot verify application state.
 
 - `launch-and-wait.yaml`: version 2 launch, text readiness and an assertion, with
   replaceable application/window/field variables. Simulate before native playback.
+- `layout-and-capture.yaml`: version 2 window positioning and a primary-display
+  PNG checkpoint. Replace selectors and use a new output filename for each take.
+  Native screenshots need macOS 15.2+ and Screen Recording permission; dry runs
+  save no images. See [layout and capture](../docs/guide/layout-and-capture.md).

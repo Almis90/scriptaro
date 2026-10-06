@@ -279,6 +279,12 @@ impl Compiler<'_> {
     }
     fn action(&mut self, action: &mut Action, at: &str) -> Result<(), ScriptError> {
         match action {
+            Action::SetWindowBounds { window, .. } => self.window(window, at)?,
+            Action::Screenshot { path, .. } => {
+                let mut text = path.to_string_lossy().into_owned();
+                self.text(&mut text, at)?;
+                *path = text.into();
+            }
             Action::LaunchApp { app, .. } => match app {
                 LaunchTarget::Identifier(id) => self.text(id, at)?,
                 LaunchTarget::Path(path) => {

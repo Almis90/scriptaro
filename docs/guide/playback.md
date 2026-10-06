@@ -4,6 +4,11 @@ The engine executes one step at a time. It validates the complete script and
 checks required backend capabilities, permissions, and referenced files before
 any desktop actions begin. Failure stops playback with the step number and cause.
 
+For [window layout and screenshot actions](/guide/layout-and-capture), geometry is
+verified without repeating changes. Screenshot destinations must be new files in
+existing directories; capture permissions and destinations are checked before
+desktop effects. Dry runs create no image files.
+
 ## Timing
 
 `defaults.character_delay_ms` controls the interval between Unicode scalar values.

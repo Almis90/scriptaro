@@ -51,6 +51,8 @@ Interpolation is supported in:
 
 - `type_text.text`, `open_file.path`, launch identifiers/paths and text assertions’
   `expect.equals`, including `control_matches` readiness expectations.
+- Screenshot output paths and window-layout selectors. Geometry remains numeric;
+  variables do not substitute numbers or change the YAML structure.
 - Application identifiers and names (not numeric PIDs).
 - Window titles and control identifiers/labels.
 - Those same selectors inside readiness conditions, including section `requires`.

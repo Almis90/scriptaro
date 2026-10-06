@@ -1,7 +1,7 @@
 # macOS setup
 
-Scriptaro uses native AppKit, Accessibility and CoreGraphics APIs. There is no AppleScript
-foundation, shell-driven keyboard injection, or screen-recording dependency.
+Scriptaro uses native AppKit, Accessibility, CoreGraphics and ScreenCaptureKit APIs.
+Screenshot capture requires macOS 15.2+. Other automation does not depend on capture.
 
 ## Permissions
 
@@ -16,11 +16,13 @@ The command reports capabilities and permissions without changing them.
 | Accessibility | Keyboard/pointer input, window discovery and window focus checks |
 | Post events | Permission for Quartz input event delivery |
 | Input Monitoring | Optional global Control–Option–Escape stop shortcut |
+| Screen Recording | Only the `screenshot` action (macOS 15.2+) |
 
 Grant Accessibility access in **System Settings → Privacy & Security →
 Accessibility** to the executable or launching terminal identified by macOS.
 Restart it after changing permissions. Grant Input Monitoring if you want the
-global stop shortcut. Core automation does not require Screen Recording access.
+global stop shortcut. Grant Screen Recording access only if using
+[`screenshot`](/guide/layout-and-capture); scripts without it do not require that access.
 
 ## Select an application
 

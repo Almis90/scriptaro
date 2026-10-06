@@ -101,3 +101,10 @@ See [Motion and control assertions](/guide/motion-and-assertions).
 the expected text, then asserts that value. Replace the app/window/field variables
 before native playback. Rehearse with `scriptaro run examples/launch-and-wait.yaml --dry-run`.
 See [Launching apps and waiting for values](/guide/launch-and-readiness).
+
+## Window layout and screenshots
+
+`examples/layout-and-capture.yaml` arranges a specific window and saves a primary
+display PNG. Set the app/window variables and choose a fresh output name before
+native playback. Rehearse with `scriptaro run examples/layout-and-capture.yaml --dry-run`;
+simulation writes no images. See [Window layout and screenshots](/guide/layout-and-capture).

@@ -143,3 +143,11 @@ running process selectors. The backend dispatches launch once and returns an
 owned `PendingLaunch`; the engine polls readiness for the actual process and
 optionally establishes its focus guard. `control_matches` conditions reuse
 property comparisons through the existing bounded readiness loop.
+
+Window geometry uses the platform-neutral `Bounds` model and separate
+`WindowBounds` capability. The backend returns a retained target after dispatch;
+the engine verifies its geometry without retargeting or altering input guards.
+Screenshots have their own capability and return an owned PNG future. Backends
+never receive output paths. The engine stages and publishes images without
+overwriting destinations, handles cancellation, and skips filesystem access in
+simulation. Native macOS capture details remain entirely inside the backend.

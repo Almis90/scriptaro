@@ -1,4 +1,4 @@
-use crate::{accessibility::Element, ffi, keyboard};
+use crate::{accessibility::Element, capture, ffi, keyboard};
 use block2::RcBlock;
 use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
 use core_graphics::{
@@ -18,7 +18,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSError, NSString, NSURL};
 use scriptaro_core::{
-    AppSelector, Condition, ControlAssertion, ControlSelector, Key, LaunchTarget, Modifier,
+    AppSelector, Bounds, Condition, ControlAssertion, ControlSelector, Key, LaunchTarget, Modifier,
     MouseButton, Point, WindowSelector,
 };
 use scriptaro_platform::{
@@ -218,6 +218,8 @@ impl DesktopBackend for MacOsBackend {
     }
     fn capabilities(&self) -> &'static [Capability] {
         &[
+            Capability::WindowBounds,
+            Capability::Screenshot,
             Capability::Applications,
             Capability::Launch,
             Capability::OpenFile,
@@ -234,6 +236,11 @@ impl DesktopBackend for MacOsBackend {
     }
     fn permissions(&self) -> Vec<PermissionStatus> {
         vec![
+            PermissionStatus {
+                name: "Screen Recording",
+                granted: capture::permitted(),
+                purpose: "required only for screenshots (macOS 15.2+)",
+            },
             PermissionStatus {
                 name: "Accessibility",
                 granted: ffi::accessibility_trusted(),
@@ -252,7 +259,11 @@ impl DesktopBackend for MacOsBackend {
         ]
     }
     fn check_permissions(&self, required: &[Capability]) -> BackendResult<()> {
+        if required.contains(&Capability::Screenshot) {
+            capture::preflight()?;
+        }
         if required.contains(&Capability::Windows)
+            || required.contains(&Capability::WindowBounds)
             || required.contains(&Capability::Controls)
             || required.contains(&Capability::ControlAssertions)
         {
@@ -581,6 +592,34 @@ impl DesktopBackend for MacOsBackend {
                     .map_err(|_| native("application launch callback was dropped"))?
             }) as scriptaro_platform::PendingLaunch)
         })
+    }
+    fn set_window_bounds(
+        &mut self,
+        selector: &WindowSelector,
+        bounds: Bounds,
+    ) -> BackendResult<Option<WindowTarget>> {
+        autoreleasepool(|_| {
+            let Some((pid, window)) = self.window_match(selector)? else {
+                return Ok(None);
+            };
+            window.set_bounds(bounds)?;
+            Ok(Some(self.retain_window(pid, window)))
+        })
+    }
+    fn window_bounds(&mut self, target: &WindowTarget) -> BackendResult<Bounds> {
+        self.ensure_accessibility()?;
+        self.windows
+            .iter()
+            .find(|(known, _)| known == target)
+            .ok_or_else(|| native("unknown retained window identity"))?
+            .1
+            .bounds()
+    }
+    fn screenshot(
+        &mut self,
+        region: Option<Bounds>,
+    ) -> BackendResult<scriptaro_platform::PendingScreenshot> {
+        capture::capture(region)
     }
     fn is_app_ready(&mut self, app: &AppSelector) -> BackendResult<bool> {
         autoreleasepool(|_| match self.resolve_running(app) {

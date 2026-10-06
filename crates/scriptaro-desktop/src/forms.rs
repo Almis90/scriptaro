@@ -82,7 +82,9 @@ pub struct Form {
 impl Kind {
     pub fn of(action: &Action) -> Self {
         match action {
-            Action::LaunchApp { .. }
+            Action::SetWindowBounds { .. }
+            | Action::Screenshot { .. }
+            | Action::LaunchApp { .. }
             | Action::WaitUntil {
                 condition: Condition::ControlMatches { .. },
                 ..
@@ -273,7 +275,11 @@ impl Form {
             fields: vec![],
         };
         match action {
-            Action::LaunchApp { .. } | Action::AssertControl { .. } | Action::MouseDrag { .. } => {}
+            Action::SetWindowBounds { .. }
+            | Action::Screenshot { .. }
+            | Action::LaunchApp { .. }
+            | Action::AssertControl { .. }
+            | Action::MouseDrag { .. } => {}
             Action::Wait { duration_ms } => form.text(
                 "duration",
                 "Duration (milliseconds)",

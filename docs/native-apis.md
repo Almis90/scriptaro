@@ -72,3 +72,17 @@ different installation. The callback returns an owned process ID; the engine
 polls finished-launching state and optional focus within one deadline. SDK
 headers confirm that some apps never expose finished-launching state. Value
 readiness reuses the explicit AX property readers through read-only polling.
+
+Window geometry uses `AXPosition`/`AXSize` with type-checked `AXValue` CGPoint and
+CGSize values. Both attributes must be writable before either is changed; size
+and position are each set once, then the retained window identity is polled.
+
+Screenshots use Apple's
+[ScreenCaptureKit region capture API](https://developer.apple.com/documentation/screencapturekit/scscreenshotmanager/captureimage(in:completionhandler:))
+(macOS 15.2+), loaded at runtime to preserve other actions on older macOS versions.
+The local `SCScreenshotManager.h` confirms desktop-space points and multi-display
+regions. The callback encodes PNG in memory through
+[ImageIO](https://developer.apple.com/documentation/imageio/cgimagedestinationcreatewithdata(_:_:_:_:));
+only owned bytes cross the callback boundary. Preflight checks Screen Recording
+permission without prompting. A synthetic-image test covers PNG encoding without
+capturing the desktop; live capture compatibility has not been verified here.
