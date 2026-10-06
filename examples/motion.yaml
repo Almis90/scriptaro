@@ -1,0 +1,16 @@
+version: 1
+name: Smooth pointer and drag rehearsal
+# Adapt every coordinate to a disposable target before live playback.
+# No activation is included: this example uses the current desktop focus.
+steps:
+  - action: mouse_move
+    x: 200
+    y: 200
+    duration_ms: 800
+  - action: wait
+    duration_ms: 300
+  - action: mouse_drag
+    from: {x: 200, y: 200}
+    to: {x: 500, y: 350}
+    button: left
+    duration_ms: 1200

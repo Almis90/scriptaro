@@ -60,6 +60,9 @@ pub fn capability(capability: &Capability) -> &'static str {
         Capability::OpenFile => "open_file",
         Capability::Keyboard => "keyboard",
         Capability::Pointer => "pointer",
+        Capability::PointerPosition => "pointer_position",
+        Capability::Drag => "drag",
+        Capability::ControlAssertions => "control_assertions",
         Capability::Scroll => "scroll",
         Capability::FocusQuery => "focus_query",
         Capability::Windows => "windows",
@@ -74,6 +77,9 @@ pub fn plan(script: &Script) -> Vec<Value> {
             Action::TypeText { text, interval_ms } => json!({"action":"type_text", "characters":text.chars().count(), "interval_ms":interval_ms.unwrap_or(script.defaults.character_delay_ms)}),
             _ => serde_json::to_value(action).expect("validated actions serialize"),
         };
+        if let Action::AssertControl { expect: scriptaro_core::ControlAssertion::Text(text), .. } = action {
+            value["expect"] = json!({"property":"text", "characters":text.chars().count()});
+        }
         value["step"] = json!(index+1);
         if let Some(timeout) = value.get_mut("timeout_ms") { if timeout.is_null() { *timeout = json!(script.defaults.timeout_ms); } }
         value
@@ -89,6 +95,7 @@ pub struct RunData {
     pub retake: bool,
     pub mode: &'static str,
     pub readiness_assumed: bool,
+    pub assertions_assumed: bool,
     pub timing_preserved: bool,
     pub speed: Option<f64>,
     pub start_delay_ms: u64,

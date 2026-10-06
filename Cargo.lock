@@ -495,6 +495,7 @@ dependencies = [
  "block2",
  "core-foundation",
  "core-graphics",
+ "foreign-types",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

@@ -185,6 +185,16 @@ impl From<EngineError> for Diagnostic {
                         message,
                         "Restore the intended target and start a fresh take. Failed actions are never retried automatically.",
                     ),
+                    StepError::AssertionFailed { .. } => Self::new(
+                        "assertion_failed",
+                        message,
+                        "Inspect the target and expected property. If the app is still updating, add a readiness check or explicit wait before the assertion.",
+                    ),
+                    StepError::DragInterrupted => Self::new(
+                        "drag_interrupted",
+                        message,
+                        "The button was released. Inspect the partial drag and start a fresh take when ready.",
+                    ),
                     StepError::Cancelled => Self::new(
                         "cancelled",
                         message,

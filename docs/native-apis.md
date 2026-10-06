@@ -55,3 +55,12 @@ nonactivating transport uses an explicit floating window level in addition to
 panel flags. Apple's [window-level contract](https://developer.apple.com/documentation/appkit/nswindow/level-swift.property)
 places floating windows above normal-level windows. The live transport test
 checks the app under the button coordinates before posting a real mouse click.
+
+Dragging uses [CoreGraphics drag event types](https://developer.apple.com/documentation/coregraphics/cgeventtype),
+with a preallocated mouse-up event and updated location/timestamp before posting.
+`CGEventSetTimestamp` and `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` signatures and
+clock constants were checked against the local SDK.
+Explicit assertions read [AXValue](https://developer.apple.com/documentation/applicationservices/kaxvalueattribute)
+as a checked CFString or checkbox CFNumber/CFBoolean; unsupported types are errors.
+Secure fields remain excluded. These changes have simulated/fault-injection
+coverage and macOS build validation; no new live compatibility result is claimed.

@@ -1,0 +1,22 @@
+version: 2
+name: Verify a prepared field
+variables:
+  app: 'REPLACE_WITH_APP_IDENTIFIER'
+  window: 'REPLACE_WITH_EXACT_WINDOW_TITLE'
+  field: 'REPLACE_WITH_FIELD_IDENTIFIER'
+  expected: 'Hello team'
+steps:
+  - action: assert_control
+    control: &field
+      window:
+        app: {by: identifier, value: '${app}'}
+        title: '${window}'
+      role: text_field
+      identifier: '${field}'
+    expect: {property: exists, equals: true}
+  - action: assert_control
+    control: *field
+    expect: {property: enabled, equals: true}
+  - action: assert_control
+    control: *field
+    expect: {property: text, equals: '${expected}'}

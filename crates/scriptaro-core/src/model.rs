@@ -120,9 +120,55 @@ impl Condition {
     }
 }
 
+/// Desktop logical coordinates, origin at the primary display's top-left.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// One explicit read-only property comparison. Actual field values are never logged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "property",
+    content = "equals",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum ControlAssertion {
+    Exists(bool),
+    Enabled(bool),
+    Focused(bool),
+    Text(String),
+    Checked(bool),
+}
+impl ControlAssertion {
+    pub fn property(&self) -> &'static str {
+        match self {
+            Self::Exists(_) => "exists",
+            Self::Enabled(_) => "enabled",
+            Self::Focused(_) => "focused",
+            Self::Text(_) => "text",
+            Self::Checked(_) => "checked",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    AssertControl {
+        control: ControlSelector,
+        expect: ControlAssertion,
+    },
+    MouseDrag {
+        from: Point,
+        to: Point,
+        duration_ms: u64,
+        #[serde(default)]
+        button: MouseButton,
+    },
     FocusControl {
         control: ControlSelector,
         #[serde(default)]
@@ -171,6 +217,8 @@ pub enum Action {
     MouseMove {
         x: f64,
         y: f64,
+        #[serde(default)]
+        duration_ms: u64,
     },
     MouseClick {
         #[serde(default)]
@@ -195,6 +243,8 @@ impl Action {
     /// Stable name for logs and events; deliberately excludes user content.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::AssertControl { .. } => "assert_control",
+            Self::MouseDrag { .. } => "mouse_drag",
             Self::FocusControl { .. } => "focus_control",
             Self::InvokeControl { .. } => "invoke_control",
             Self::Wait { .. } => "wait",

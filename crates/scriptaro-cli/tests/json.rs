@@ -443,3 +443,34 @@ fn variables_and_sequences_work_through_plan_validation_sections_and_saved_runs(
         assert_eq!(value["error"]["code"], "invalid_variables");
     }
 }
+
+#[test]
+fn motion_and_assertions_have_redacted_plans_and_explicit_simulation_reports() {
+    let scratch = Scratch::new();
+    let path=scratch.script("version: 1\nsteps:\n  - {action: mouse_move, x: 20, y: 30, duration_ms: 200}\n  - {action: mouse_drag, from: {x: 20, y: 30}, to: {x: 120, y: 60}, duration_ms: 500}\n  - action: assert_control\n    control: {window: {app: {by: name, value: Example}, title: Scratch}, role: text_field, identifier: field}\n    expect: {property: text, equals: 'PRIVATE expected'}\n");
+    let output = cli().arg("plan").arg(&path).arg("--json").output().unwrap();
+    let value = json(&output, 0);
+    assert_eq!(value["data"]["steps"][0]["duration_ms"], 200);
+    assert_eq!(value["data"]["steps"][2]["expect"]["characters"], 16);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+    let caps = value["data"]["required_capabilities"].as_array().unwrap();
+    for cap in ["pointer_position", "drag", "control_assertions"] {
+        assert!(caps.contains(&serde_json::json!(cap)));
+    }
+    let report = scratch.0.join("motion.json");
+    let output = cli()
+        .arg("run")
+        .arg(&path)
+        .args(["--dry-run", "--json", "--report"])
+        .arg(&report)
+        .output()
+        .unwrap();
+    let value = json(&output, 0);
+    assert_eq!(value["data"]["completed_steps"], 3);
+    assert_eq!(value["data"]["assertions_assumed"], true);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(report).unwrap()).unwrap(),
+        value
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE"));
+}

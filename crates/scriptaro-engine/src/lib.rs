@@ -4,10 +4,11 @@ mod control;
 pub use control::{ControlState, PlaybackController};
 
 use scriptaro_core::{
-    Action, AppSelector, Condition, ControlSelector, Script, ValidationError, WindowSelector,
+    Action, AppSelector, Condition, ControlSelector, Point, Script, ValidationError, WindowSelector,
 };
 use scriptaro_platform::{
-    BackendError, ControlTarget, DesktopBackend, PendingOpen, WindowTarget, required_capabilities,
+    BackendError, ControlTarget, DesktopBackend, DragSession, PendingOpen, WindowTarget,
+    required_capabilities,
 };
 use std::{path::PathBuf, time::Duration};
 use thiserror::Error;
@@ -22,7 +23,7 @@ const TICK: Duration = Duration::from_millis(20);
 pub struct RunOptions {
     /// Relative script paths resolve against this directory, never the process CWD.
     pub base_dir: PathBuf,
-    /// Scales typing intervals and explicit waits, not native readiness timeouts.
+    /// Scales typing intervals, pointer motion and explicit waits, not native readiness timeouts.
     pub speed: f64,
     /// Only permitted for a simulated backend.
     pub skip_delays: bool,
@@ -97,6 +98,10 @@ pub enum StepError {
     WindowFocusLost,
     #[error("selected control is no longer focused and enabled; playback stopped")]
     ControlFocusLost,
+    #[error("control assertion failed for {property}; playback stopped")]
+    AssertionFailed { property: &'static str },
+    #[error("drag interrupted by pause; mouse button released and playback stopped")]
+    DragInterrupted,
     #[error("playback cancelled")]
     Cancelled,
 }
@@ -445,24 +450,108 @@ impl<'a> Engine<'a> {
         }
     }
 
+    fn check_focus(&mut self) -> Result<(), StepError> {
+        if let Some(app) = &self.focus {
+            if !self.backend.is_app_active(app)? {
+                return Err(StepError::FocusLost(app.clone()));
+            }
+        }
+        if let Some(window) = &self.window_focus {
+            if !self.backend.is_window_active(window)? {
+                return Err(StepError::WindowFocusLost);
+            }
+        }
+        if let Some(control) = &self.control_focus {
+            if !self.backend.is_control_focused(control)? {
+                return Err(StepError::ControlFocusLost);
+            }
+        }
+        Ok(())
+    }
+
+    fn drag_state(&mut self) -> Result<(), StepError> {
+        match self.state()? {
+            ControlState::Running => Ok(()),
+            ControlState::Paused => Err(StepError::DragInterrupted),
+            ControlState::Cancelled => Err(StepError::Cancelled),
+        }
+    }
+    async fn before_drag_input(&mut self) -> Result<(), StepError> {
+        tokio::task::yield_now().await;
+        self.drag_state()?;
+        self.check_focus()?;
+        // Do not service native events between a focus check and input delivery.
+        match self.controller.state() {
+            ControlState::Running => Ok(()),
+            ControlState::Paused => Err(StepError::DragInterrupted),
+            ControlState::Cancelled => Err(StepError::Cancelled),
+        }
+    }
+    async fn drag_delay(&mut self, mut remaining: Duration) -> Result<(), StepError> {
+        self.drag_state()?;
+        if self.options.skip_delays {
+            return Ok(());
+        }
+        while !remaining.is_zero() {
+            let start = Instant::now();
+            tokio::select! { biased;
+                _ = self.commands.changed() => {},
+                _ = tokio::time::sleep(remaining.min(TICK)) => {},
+            }
+            remaining = remaining.saturating_sub(start.elapsed());
+            self.drag_state()?;
+        }
+        Ok(())
+    }
+    async fn pointer_motion(
+        &mut self,
+        from: Point,
+        to: Point,
+        duration_ms: u64,
+        mut drag: Option<&mut DragSession>,
+    ) -> Result<(), StepError> {
+        let duration = if self.options.skip_delays {
+            Duration::ZERO
+        } else {
+            self.scaled(duration_ms)
+        };
+        let mut elapsed = Duration::ZERO;
+        loop {
+            let chunk = (duration - elapsed).min(TICK);
+            if drag.is_some() {
+                self.drag_delay(chunk).await?;
+                self.before_drag_input().await?;
+            } else {
+                self.delay(chunk).await?;
+                self.before_input().await?;
+            }
+            elapsed += chunk;
+            let point = if elapsed == duration {
+                to
+            } else {
+                let t = elapsed.as_secs_f64() / duration.as_secs_f64();
+                let t = t * t * (3.0 - 2.0 * t);
+                Point {
+                    x: from.x * (1.0 - t) + to.x * t,
+                    y: from.y * (1.0 - t) + to.y * t,
+                }
+            };
+            if let Some(session) = drag.as_mut() {
+                session.move_to(point)?;
+            } else {
+                self.backend.move_pointer(point.x, point.y)?;
+            }
+            if elapsed == duration {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     async fn before_input(&mut self) -> Result<(), StepError> {
         loop {
             self.checkpoint().await?;
-            if let Some(app) = &self.focus {
-                if !self.backend.is_app_active(app)? {
-                    return Err(StepError::FocusLost(app.clone()));
-                }
-            }
-            if let Some(window) = &self.window_focus {
-                if !self.backend.is_window_active(window)? {
-                    return Err(StepError::WindowFocusLost);
-                }
-            }
-            if let Some(control) = &self.control_focus {
-                if !self.backend.is_control_focused(control)? {
-                    return Err(StepError::ControlFocusLost);
-                }
-            }
+            self.check_focus()?;
             // Remote queries can take time. Honor a control change received while
             // querying; after a pause, repeat the focus checks before sending input.
             // Do not pump native events after validating focus: that could itself
@@ -475,6 +564,28 @@ impl<'a> Engine<'a> {
 
     async fn execute(&mut self, action: &Action, script: &Script) -> Result<(), StepError> {
         match action {
+            Action::AssertControl { control, expect } => {
+                self.checkpoint().await?;
+                let matched = self.backend.assert_control(control, expect)?;
+                self.checkpoint().await?;
+                if !matched {
+                    return Err(StepError::AssertionFailed {
+                        property: expect.property(),
+                    });
+                }
+            }
+            Action::MouseDrag {
+                from,
+                to,
+                duration_ms,
+                button,
+            } => {
+                self.before_input().await?;
+                let mut drag = self.backend.begin_drag(*from, *button)?;
+                // RAII releases even when this future is dropped by its host.
+                self.pointer_motion(*from, *to, *duration_ms, Some(&mut drag))
+                    .await?;
+            }
             Action::FocusControl {
                 control,
                 timeout_ms,
@@ -541,9 +652,20 @@ impl<'a> Engine<'a> {
                 self.before_input().await?;
                 self.backend.press_key(*key, modifiers)?;
             }
-            Action::MouseMove { x, y } => {
+            Action::MouseMove { x, y, duration_ms } => {
                 self.before_input().await?;
-                self.backend.move_pointer(*x, *y)?;
+                if *duration_ms == 0 {
+                    self.backend.move_pointer(*x, *y)?;
+                } else {
+                    let from = self.backend.pointer_position()?;
+                    if !from.x.is_finite() || !from.y.is_finite() {
+                        return Err(
+                            BackendError::Native("pointer position is not finite".into()).into(),
+                        );
+                    }
+                    self.pointer_motion(from, Point { x: *x, y: *y }, *duration_ms, None)
+                        .await?;
+                }
             }
             Action::MouseClick { button, count } => {
                 self.before_input().await?;

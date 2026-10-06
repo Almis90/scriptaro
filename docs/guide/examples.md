@@ -80,3 +80,17 @@ scriptaro run examples/reusable.yaml --section Introduction --dry-run --var 'top
 
 See [Variables and reusable sequences](/guide/reuse) for the complete example
 and CLI override rules.
+
+## Motion and assertions
+
+`examples/motion.yaml` rehearses smooth pointer movement and dragging. Adapt
+coordinates to a disposable target before live playback.
+`examples/assertions.yaml` checks a field's existence, enabled state and text;
+replace its selector variables for your application.
+
+```sh
+scriptaro run examples/motion.yaml --dry-run
+scriptaro plan examples/assertions.yaml --json
+```
+
+See [Motion and control assertions](/guide/motion-and-assertions).

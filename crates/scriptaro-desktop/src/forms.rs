@@ -8,6 +8,8 @@ use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
+    /// CLI/YAML actions without guided forms yet.
+    Advanced,
     Wait,
     TypeText,
     KeyPress,
@@ -80,6 +82,7 @@ pub struct Form {
 impl Kind {
     pub fn of(action: &Action) -> Self {
         match action {
+            Action::AssertControl { .. } | Action::MouseDrag { .. } => Self::Advanced,
             Action::Wait { .. } => Self::Wait,
             Action::TypeText { .. } => Self::TypeText,
             Action::KeyPress { .. } => Self::KeyPress,
@@ -126,6 +129,13 @@ impl Form {
             label: None,
         };
         let action = match kind {
+            Kind::Advanced => {
+                return Self {
+                    kind,
+                    condition,
+                    fields: vec![],
+                };
+            }
             Kind::Wait => Action::Wait { duration_ms: 1000 },
             Kind::TypeText => Action::TypeText {
                 text: String::new(),
@@ -167,7 +177,11 @@ impl Form {
                 app: None,
                 timeout_ms: None,
             },
-            Kind::MouseMove => Action::MouseMove { x: 0., y: 0. },
+            Kind::MouseMove => Action::MouseMove {
+                x: 0.,
+                y: 0.,
+                duration_ms: 0,
+            },
             Kind::MouseClick => Action::MouseClick {
                 button: MouseButton::Left,
                 count: 1,
@@ -252,6 +266,7 @@ impl Form {
             fields: vec![],
         };
         match action {
+            Action::AssertControl { .. } | Action::MouseDrag { .. } => {}
             Action::Wait { duration_ms } => form.text(
                 "duration",
                 "Duration (milliseconds)",
@@ -329,7 +344,12 @@ impl Form {
                 form.app_fields(app.as_ref(), true);
                 form.timeout(*timeout_ms);
             }
-            Action::MouseMove { x, y } => {
+            Action::MouseMove { x, y, duration_ms } => {
+                form.text(
+                    "duration",
+                    "Duration ms (0 = instant)",
+                    duration_ms.to_string(),
+                );
                 form.text("x", "X (desktop logical points)", x.to_string());
                 form.text("y", "Y (desktop logical points)", y.to_string());
             }
@@ -422,6 +442,12 @@ impl Form {
     pub fn action(&self) -> Result<Action, BuilderError> {
         let timeout = || self.optional_number("timeout");
         let action = match self.kind {
+            Kind::Advanced => {
+                return Err(BuilderError(
+                    "Edit this action in the YAML editor; guided forms are not available yet."
+                        .into(),
+                ));
+            }
             Kind::Wait => Action::Wait {
                 duration_ms: self.number("duration")?,
             },
@@ -489,6 +515,7 @@ impl Form {
                 timeout_ms: timeout()?,
             },
             Kind::MouseMove => Action::MouseMove {
+                duration_ms: self.number("duration")?,
                 x: self.number("x")?,
                 y: self.number("y")?,
             },

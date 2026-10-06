@@ -1,4 +1,7 @@
-use crate::{Action, AppSelector, Condition, ControlSelector, Script, WindowSelector};
+use crate::{
+    Action, AppSelector, Condition, ControlAssertion, ControlRole, ControlSelector, Script,
+    WindowSelector,
+};
 use thiserror::Error;
 
 pub const MAX_SCRIPT_BYTES: usize = 4 * 1024 * 1024;
@@ -111,6 +114,52 @@ impl Script {
         for (index, step) in self.steps.iter().enumerate() {
             let location = format!("steps[{}] ({})", index + 1, step.kind());
             match step {
+                Action::AssertControl {
+                    control: selector,
+                    expect,
+                } => {
+                    control(selector, &location)?;
+                    match expect {
+                        ControlAssertion::Text(text) => {
+                            if !matches!(
+                                selector.role,
+                                ControlRole::TextField
+                                    | ControlRole::TextArea
+                                    | ControlRole::ComboBox
+                            ) {
+                                return Err(ValidationError::at(
+                                    &location,
+                                    "text assertions require a text field, text area or combo box",
+                                ));
+                            }
+                            text_bytes = text_bytes.saturating_add(text.len());
+                            if text_bytes > MAX_SCRIPT_BYTES || text.contains('\0') {
+                                return Err(ValidationError::at(
+                                    &location,
+                                    "assertion text must contain no NUL and combined text must not exceed 4 MiB",
+                                ));
+                            }
+                        }
+                        ControlAssertion::Checked(_) if selector.role != ControlRole::CheckBox => {
+                            return Err(ValidationError::at(
+                                &location,
+                                "checked assertions require a check box",
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                Action::MouseDrag {
+                    from,
+                    to,
+                    duration_ms,
+                    ..
+                } => {
+                    if ![from.x, from.y, to.x, to.y].iter().all(|n| n.is_finite()) {
+                        return Err(ValidationError::at(&location, "coordinates must be finite"));
+                    }
+                    duration(*duration_ms, &location, false)?;
+                }
                 Action::Wait { duration_ms } => duration(*duration_ms, &location, false)?,
                 Action::WaitUntil {
                     condition,
@@ -221,8 +270,11 @@ impl Script {
                         }
                     }
                 }
-                Action::MouseMove { x, y } if !x.is_finite() || !y.is_finite() => {
-                    return Err(ValidationError::at(&location, "coordinates must be finite"));
+                Action::MouseMove { x, y, duration_ms } => {
+                    if !x.is_finite() || !y.is_finite() {
+                        return Err(ValidationError::at(&location, "coordinates must be finite"));
+                    }
+                    duration(*duration_ms, &location, false)?;
                 }
                 Action::MouseClick { count, .. } if !(1..=3).contains(count) => {
                     return Err(ValidationError::at(

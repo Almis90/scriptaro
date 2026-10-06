@@ -131,8 +131,10 @@ automatic permission prompt or AppleScript dependency.
 
 Pause preserves the remaining typing/wait delay. Cancellation is terminal and
 stops further actions; it cannot undo actions already delivered. OS file-open
-requests may complete after cancellation or timeout. Each native key or mouse
-operation posts its down/up pair without an asynchronous interruption between them.
+requests may complete after cancellation or timeout. Key presses and clicks
+post complete down/up pairs. Drags own a release guard; cancellation, errors or
+pause release the button and stop the take. Smooth pointer moves can resume
+after a pause.
 
 After activation or file opening, Scriptaro checks that the intended application
 is frontmost before every input operation. It stops on focus loss. This checks
@@ -217,7 +219,8 @@ untouched during playback. See the [trial setup and limits](docs/guide/developme
   Native calls cannot be interrupted; deadlines and cancellation are checked
   after synchronous backend queries return.
 - Mouse coordinates are desktop logical points; scripts are sensitive to window
-  placement and display arrangement. Dragging and held keys are not implemented.
+  placement and display arrangement. Smooth movement and dragging are supported;
+  standalone held keys are not implemented. See [motion and assertions](docs/guide/motion-and-assertions.md).
 - `serde_yaml` is used as requested but is unmaintained. Parsing is isolated in
   `scriptaro_core::yaml`. Scripts are bounded and strictly validated, but the
   parser is not a security sandbox for adversarial input.

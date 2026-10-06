@@ -30,3 +30,8 @@ playback checks that referenced files exist before activating an application.
 sequences. Run `scriptaro plan examples/reusable.yaml --var 'topic=Launch planning'`
 from the repository root, then rehearse with `run --dry-run`. The native editor
 currently supports version 1 only.
+
+- `motion.yaml`: smooth pointer movement and a drag between explicit points.
+- `assertions.yaml`: version 2 property assertions with selector/text variables.
+
+Simulations assume assertions pass; they cannot verify application state.

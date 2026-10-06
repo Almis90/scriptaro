@@ -53,7 +53,8 @@ permissions or `native_supported: false`. Check its data before native playback.
 `plan` returns flattened `steps`, `total_steps`, `defaults`,
 `required_capabilities` and `effects_executed: false`. Step numbers start at one.
 A selected take includes setup and readiness; `--retake` also includes reset.
-Actions use the YAML action field names. `type_text` replaces the prepared text
+Actions use the YAML action field names. Text assertions replace expected
+`equals` text with its `characters` count; actual control values are never included. `type_text` replaces the prepared text
 with `characters` (Unicode scalar count) and effective `interval_ms`.
 Defaulted action timeouts are resolved to numeric `timeout_ms` values.
 
@@ -86,7 +87,7 @@ same envelope as JSON stdout, formatted for reading. Its `data` records:
 
 - Requested script, source version (once compiled), section and retake selection.
 - `mode` (`simulation` or `desktop`), backend, speed and countdown.
-- `readiness_assumed` and `timing_preserved`. Ordinary simulation skips delays;
+- `readiness_assumed`, `assertions_assumed` and `timing_preserved`. Ordinary simulation skips delays;
   `--realtime` preserves them. Simulation always assumes readiness.
 - `status`, `total_steps`, `completed_steps` and `failed_step`.
 - `started_at_unix_ms` and `elapsed_ms`, including preparation and playback,
@@ -127,7 +128,7 @@ Common codes include `invalid_yaml`, `invalid_script`, `invalid_options`,
 `file_not_found`, `file_exists`, `permission_denied`, `unsupported_capability`,
 `app_not_found`, `ambiguous_app`, `ambiguous_window`, `ambiguous_control`,
 `control_label_unavailable`, `focus_lost`, `timeout`, `native_error` and
-`report_write_failed`.
+`report_write_failed`, `assertion_failed` and `drag_interrupted`.
 
 Successful plans omit prepared text, and run reports do not embed scripts or
 individual typed characters. These files are not fully redacted: paths,

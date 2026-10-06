@@ -17,6 +17,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 block2 = "0.6"
 core-graphics = { version = "0.25", features = ["highsierra"] }
 core-foundation = "0.10"
+foreign-types = "0.5"
 
 [lints]
 workspace = true

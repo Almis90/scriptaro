@@ -38,9 +38,14 @@ pause immediately. Pausing does not undo an OS request already sent.
 | `open_file` | `path` | `app`, `timeout_ms` |
 | `type_text` | `text` | `interval_ms` |
 | `key_press` | `key` | `modifiers` (default `[]`) |
-| `mouse_move` | finite `x`, `y` | — |
+| `mouse_move` | finite `x`, `y` | `duration_ms` (default `0`, instant) |
+| `mouse_drag` | `from`, `to` (`x`, `y` points), `duration_ms` | `button` (`left`) |
+| `assert_control` | `control`, `expect` (`property`, `equals`) | — |
 | `mouse_click` | — | `button` (`left`), `count` (`1`, range 1–3) |
 | `scroll` | — | `horizontal` (`0`), `vertical` (`0`) |
+
+See [Motion and control assertions](/guide/motion-and-assertions) for smooth
+movement, drag interruption/release behavior and supported assertion properties.
 
 Scroll is measured in line units. Positive vertical values scroll up; positive
 horizontal values scroll left. Each delta is limited to ±10,000.

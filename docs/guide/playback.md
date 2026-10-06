@@ -17,7 +17,7 @@ checks the submitted values. A wait reduces the race but does not acknowledge
 delivery; validate results in the target app. Increasing `--speed` also shortens
 these waits.
 
-`--speed 2` doubles the speed of typing and scripted waits. Native operation
+`--speed 2` doubles the speed of typing, scripted waits and pointer motion. Native operation
 timeouts and the initial countdown do not scale. Pause preserves the remaining
 typing/wait delay. Native readiness timeouts use wall time, including pauses;
 an expired timeout is reported when playback resumes.
@@ -39,6 +39,10 @@ The hotkey is polled, so hold it rather than briefly tapping it.
 Cancellation is terminal for that run. Restart with a fresh engine to replay.
 Actions already delivered cannot be undone; a file-open request already handed
 to the OS may still finish after cancellation.
+
+Pausing during a drag releases its button and stops the take; it cannot resume
+a partial drag. Smooth pointer moves can pause and resume normally. See
+[Motion and assertions](/guide/motion-and-assertions) for details.
 
 ## Focus
 

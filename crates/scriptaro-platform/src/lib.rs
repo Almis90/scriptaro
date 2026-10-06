@@ -4,8 +4,8 @@
 pub mod recording;
 
 use scriptaro_core::{
-    Action, AppSelector, Condition, ControlRole, ControlSelector, Key, Modifier, MouseButton,
-    WindowSelector,
+    Action, AppSelector, Condition, ControlAssertion, ControlRole, ControlSelector, Key, Modifier,
+    MouseButton, Point, WindowSelector,
 };
 use std::{future::Future, path::Path, pin::Pin};
 use thiserror::Error;
@@ -16,6 +16,9 @@ pub enum Capability {
     OpenFile,
     Keyboard,
     Pointer,
+    PointerPosition,
+    Drag,
+    ControlAssertions,
     Scroll,
     FocusQuery,
     Windows,
@@ -115,11 +118,35 @@ pub struct ControlTarget {
     pub id: u64,
 }
 
+/// Backend-owned drag resources. Allocate the release event before posting down.
+/// release must be infallible, must not allocate, and must post up at the last
+/// delivered position. This owned resource must not borrow DesktopBackend.
+pub trait DragBackend {
+    fn move_to(&mut self, point: Point) -> BackendResult<()>;
+    fn release(&mut self);
+}
+/// A held mouse button with automatic release on return, error, or future drop.
+/// Process termination/abort cannot run Rust destructors.
+pub struct DragSession(Box<dyn DragBackend>);
+impl DragSession {
+    pub fn new(backend: impl DragBackend + 'static) -> Self {
+        Self(Box::new(backend))
+    }
+    pub fn move_to(&mut self, point: Point) -> BackendResult<()> {
+        self.0.move_to(point)
+    }
+}
+impl Drop for DragSession {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
 /// Object-safe and deliberately not Send: GUI/native APIs may require an owning thread.
 ///
 /// Methods must return promptly. Long operations must use a request plus polling or
-/// an owned future. Every input method emits a complete down/up pair; no pressed
-/// key/button may leak across a return, error, pause, or cancellation boundary.
+/// an owned future. Ordinary input emits complete down/up pairs. begin_drag
+/// returns a DragSession owning the held button; dropping it releases immediately.
 pub trait DesktopBackend {
     fn name(&self) -> &'static str;
     fn capabilities(&self) -> &'static [Capability];
@@ -209,6 +236,22 @@ pub trait DesktopBackend {
     fn click(&mut self, _button: MouseButton, _count: u8) -> BackendResult<()> {
         Err(self.unsupported(Capability::Pointer))
     }
+    /// Read only the requested property; absence is false except Exists(false).
+    /// Unavailable attributes, ambiguity and native failures remain errors.
+    fn assert_control(
+        &mut self,
+        _control: &ControlSelector,
+        _expect: &ControlAssertion,
+    ) -> BackendResult<bool> {
+        Err(self.unsupported(Capability::ControlAssertions))
+    }
+    fn pointer_position(&mut self) -> BackendResult<Point> {
+        Err(self.unsupported(Capability::PointerPosition))
+    }
+    /// Start at an explicit point. On error, no button may remain held.
+    fn begin_drag(&mut self, _from: Point, _button: MouseButton) -> BackendResult<DragSession> {
+        Err(self.unsupported(Capability::Drag))
+    }
     fn scroll(&mut self, _horizontal: i32, _vertical: i32) -> BackendResult<()> {
         Err(self.unsupported(Capability::Scroll))
     }
@@ -224,6 +267,15 @@ pub fn required_capabilities(actions: &[Action]) -> Vec<Capability> {
     let mut required = Vec::new();
     for action in actions {
         let capabilities: &[Capability] = match action {
+            Action::AssertControl { .. } => &[
+                Capability::ControlAssertions,
+                Capability::Controls,
+                Capability::Windows,
+            ],
+            Action::MouseDrag { .. } => &[Capability::Pointer, Capability::Drag],
+            Action::MouseMove { duration_ms, .. } if *duration_ms > 0 => {
+                &[Capability::Pointer, Capability::PointerPosition]
+            }
             Action::FocusControl { .. }
             | Action::InvokeControl { .. }
             | Action::WaitUntil {

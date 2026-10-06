@@ -49,7 +49,7 @@ of `${...}`. Quote YAML defaults such as `'123'` and `'true'` to keep them strin
 
 Interpolation is supported in:
 
-- `type_text.text` and `open_file.path`.
+- `type_text.text`, `open_file.path` and text assertions’ `expect.equals`.
 - Application identifiers and names (not numeric PIDs).
 - Window titles and control identifiers/labels.
 - Those same selectors inside readiness conditions, including section `requires`.

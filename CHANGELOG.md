@@ -103,3 +103,18 @@ releases remain unpublished.
   reports expose source version without storing variable assignments.
 - Added a reusable notes example, authoring guide and portable compilation/CLI
   regression coverage. UI authoring remains version 1; no live retest is needed.
+
+### Smooth pointer movement, dragging and assertions — 2026-10-06
+
+- Added optional `mouse_move.duration_ms` with smooth interpolation, playback
+  speed scaling, pause/resume and per-update focus guards; zero remains instant.
+- Added `mouse_drag` with explicit points and a backend-owned release guard.
+  Cancellation, failure, pause and dropped run futures release the button;
+  paused drags stop the take instead of resuming partial effects.
+- Added `assert_control` for existence, enabled/focused state, exact text and
+  checkbox state, including native macOS Accessibility reads and version 2
+  interpolation. Mismatches stop playback without exposing field contents.
+- Added native drag events, separate backend capabilities, simulation/report
+  metadata, examples and documentation. Guided forms remain deferred.
+- Added focused virtual-time, cleanup, validation and report regression coverage;
+  no live desktop compatibility claim is made for these new actions.

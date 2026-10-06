@@ -191,10 +191,12 @@ impl Builder {
 /// Human-readable list labels deliberately omit prepared text and field values.
 pub fn summary(action: &Action) -> String {
     match action {
+        Action::AssertControl { expect, .. } => format!("Assert control {}", expect.property()),
+        Action::MouseDrag { duration_ms, .. } => format!("Drag pointer ({duration_ms} ms)"),
         Action::Wait { duration_ms } => format!("Wait {duration_ms} ms"),
         Action::TypeText { text, .. } => format!("Type text ({} characters)", text.chars().count()),
         Action::KeyPress { key, modifiers } => format!("Press {modifiers:?} + {key:?}"),
-        Action::MouseMove { x, y } => format!("Move pointer to {x}, {y}"),
+        Action::MouseMove { x, y, .. } => format!("Move pointer to {x}, {y}"),
         Action::MouseClick { button, count } => format!("Click {button:?} × {count}"),
         Action::Scroll {
             horizontal,

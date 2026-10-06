@@ -295,7 +295,18 @@ fn execute(command: Command, json_output: bool) -> Result<Value, Diagnostic> {
                         Action::OpenFile { path, app, .. } => {
                             format!("{}; app={app:?}", path.display())
                         }
-                        Action::MouseMove { x, y } => format!("x={x}; y={y}"),
+                        Action::MouseMove { x, y, duration_ms } => {
+                            format!("x={x}; y={y}; {duration_ms} ms")
+                        }
+                        Action::MouseDrag {
+                            from,
+                            to,
+                            duration_ms,
+                            button,
+                        } => format!("{from:?} → {to:?}; {button:?}; {duration_ms} ms"),
+                        Action::AssertControl { control, expect } => {
+                            format!("{control:?}; property={}", expect.property())
+                        }
                         Action::MouseClick { button, count } => {
                             format!("{button:?}; count={count}")
                         }

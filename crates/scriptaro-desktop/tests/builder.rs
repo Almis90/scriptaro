@@ -55,7 +55,11 @@ fn fixtures() -> Vec<Action> {
             app: Some(AppSelector::Pid(12)),
             timeout_ms: Some(1234),
         },
-        Action::MouseMove { x: -100.25, y: 2.5 },
+        Action::MouseMove {
+            x: -100.25,
+            y: 2.5,
+            duration_ms: 250,
+        },
         Action::MouseClick {
             button: MouseButton::Right,
             count: 3,

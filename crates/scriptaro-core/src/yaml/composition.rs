@@ -1,8 +1,8 @@
 //! Bounded authoring compiler. It performs no filesystem, environment or desktop access.
 use super::ScriptError;
 use crate::{
-    Action, AppSelector, Condition, ControlSelector, Defaults, MAX_SCRIPT_BYTES, Script, Section,
-    ValidationError, WindowSelector,
+    Action, AppSelector, Condition, ControlAssertion, ControlSelector, Defaults, MAX_SCRIPT_BYTES,
+    Script, Section, ValidationError, WindowSelector,
 };
 use serde::Deserialize;
 use serde_yaml::Value;
@@ -272,6 +272,12 @@ impl Compiler<'_> {
     }
     fn action(&mut self, action: &mut Action, at: &str) -> Result<(), ScriptError> {
         match action {
+            Action::AssertControl { control, expect } => {
+                self.control(control, at)?;
+                if let ControlAssertion::Text(text) = expect {
+                    self.text(text, at)?;
+                }
+            }
             Action::TypeText { text, .. } => self.text(text, at)?,
             Action::OpenFile { path, app, .. } => {
                 let mut text = path.to_string_lossy().into_owned();

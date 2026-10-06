@@ -1,12 +1,22 @@
 //! Deterministic backend for dry runs and engine tests. Never touches the desktop.
-use crate::{BackendResult, Capability, ControlTarget, DesktopBackend, PendingOpen, WindowTarget};
-use scriptaro_core::{
-    AppSelector, Condition, ControlSelector, Key, Modifier, MouseButton, WindowSelector,
+use crate::{
+    BackendResult, Capability, ControlTarget, DesktopBackend, DragBackend, DragSession,
+    PendingOpen, WindowTarget,
 };
-use std::path::{Path, PathBuf};
+use scriptaro_core::{
+    AppSelector, Condition, ControlAssertion, ControlSelector, Key, Modifier, MouseButton, Point,
+    WindowSelector,
+};
+use std::{
+    cell::{Cell, RefCell},
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
+    AssertControl(ControlSelector, ControlAssertion),
+    BeginDrag(Point, MouseButton),
     FocusControl(ControlSelector),
     InvokeControl(ControlSelector),
     Activate(AppSelector),
@@ -23,6 +33,8 @@ pub enum Operation {
 #[derive(Default)]
 pub struct RecordingBackend {
     pub operations: Vec<Operation>,
+    pub pointer: Rc<Cell<Point>>,
+    pub drag_events: Rc<RefCell<Vec<DragEvent>>>,
     pub active: Option<AppSelector>,
     pub emergency_stop: bool,
     pub active_control: Option<ControlTarget>,
@@ -39,6 +51,9 @@ impl DesktopBackend for RecordingBackend {
             Capability::OpenFile,
             Capability::Keyboard,
             Capability::Pointer,
+            Capability::PointerPosition,
+            Capability::Drag,
+            Capability::ControlAssertions,
             Capability::Scroll,
             Capability::FocusQuery,
             Capability::Windows,
@@ -125,6 +140,7 @@ impl DesktopBackend for RecordingBackend {
         Ok(())
     }
     fn move_pointer(&mut self, x: f64, y: f64) -> BackendResult<()> {
+        self.pointer.set(Point { x, y });
         self.operations.push(Operation::Move(x, y));
         Ok(())
     }
@@ -132,9 +148,58 @@ impl DesktopBackend for RecordingBackend {
         self.operations.push(Operation::Click(button, count));
         Ok(())
     }
+    fn pointer_position(&mut self) -> BackendResult<Point> {
+        Ok(self.pointer.get())
+    }
+    fn begin_drag(&mut self, from: Point, button: MouseButton) -> BackendResult<DragSession> {
+        self.pointer.set(from);
+        self.operations.push(Operation::BeginDrag(from, button));
+        self.drag_events
+            .borrow_mut()
+            .push(DragEvent::Down(from, button));
+        Ok(DragSession::new(RecordedDrag {
+            pointer: self.pointer.clone(),
+            events: self.drag_events.clone(),
+            button,
+        }))
+    }
+    fn assert_control(
+        &mut self,
+        control: &ControlSelector,
+        expect: &ControlAssertion,
+    ) -> BackendResult<bool> {
+        self.operations
+            .push(Operation::AssertControl(control.clone(), expect.clone()));
+        // Simulation assumes assertions, just like readiness; it reads no field values.
+        Ok(true)
+    }
     fn scroll(&mut self, horizontal: i32, vertical: i32) -> BackendResult<()> {
         self.operations
             .push(Operation::Scroll(horizontal, vertical));
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DragEvent {
+    Down(Point, MouseButton),
+    Move(Point),
+    Up(Point, MouseButton),
+}
+struct RecordedDrag {
+    pointer: Rc<Cell<Point>>,
+    events: Rc<RefCell<Vec<DragEvent>>>,
+    button: MouseButton,
+}
+impl DragBackend for RecordedDrag {
+    fn move_to(&mut self, point: Point) -> BackendResult<()> {
+        self.pointer.set(point);
+        self.events.borrow_mut().push(DragEvent::Move(point));
+        Ok(())
+    }
+    fn release(&mut self) {
+        self.events
+            .borrow_mut()
+            .push(DragEvent::Up(self.pointer.get(), self.button));
     }
 }

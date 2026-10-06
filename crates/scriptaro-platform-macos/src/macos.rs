@@ -18,11 +18,13 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSError, NSString, NSURL};
 use scriptaro_core::{
-    AppSelector, Condition, ControlSelector, Key, Modifier, MouseButton, WindowSelector,
+    AppSelector, Condition, ControlAssertion, ControlSelector, Key, Modifier, MouseButton, Point,
+    WindowSelector,
 };
 use scriptaro_platform::{
     ApplicationInfo, BackendError, BackendResult, Capability, ControlInfo, ControlTarget,
-    DesktopBackend, PendingOpen, PermissionStatus, WindowInfo, WindowTarget,
+    DesktopBackend, DragBackend, DragSession, PendingOpen, PermissionStatus, WindowInfo,
+    WindowTarget,
 };
 use std::{path::Path, sync::Mutex, time::Duration};
 
@@ -220,6 +222,9 @@ impl DesktopBackend for MacOsBackend {
             Capability::OpenFile,
             Capability::Keyboard,
             Capability::Pointer,
+            Capability::PointerPosition,
+            Capability::Drag,
+            Capability::ControlAssertions,
             Capability::Scroll,
             Capability::FocusQuery,
             Capability::Windows,
@@ -246,13 +251,20 @@ impl DesktopBackend for MacOsBackend {
         ]
     }
     fn check_permissions(&self, required: &[Capability]) -> BackendResult<()> {
-        if required.contains(&Capability::Windows) || required.contains(&Capability::Controls) {
+        if required.contains(&Capability::Windows)
+            || required.contains(&Capability::Controls)
+            || required.contains(&Capability::ControlAssertions)
+        {
             self.ensure_accessibility()?;
         }
         if required.iter().any(|c| {
             matches!(
                 c,
-                Capability::Keyboard | Capability::Pointer | Capability::Scroll
+                Capability::Keyboard
+                    | Capability::Pointer
+                    | Capability::Scroll
+                    | Capability::Drag
+                    | Capability::PointerPosition
             )
         }) {
             self.ensure_input_access()?;
@@ -436,6 +448,28 @@ impl DesktopBackend for MacOsBackend {
         element.press()?;
         Ok(true)
     }
+    fn assert_control(
+        &mut self,
+        control: &ControlSelector,
+        expect: &ControlAssertion,
+    ) -> BackendResult<bool> {
+        autoreleasepool(|_| {
+            let Some((pid, window, element)) = self.control_match(control)? else {
+                return Ok(matches!(expect, ControlAssertion::Exists(false)));
+            };
+            match expect {
+                ControlAssertion::Exists(expected) => Ok(*expected),
+                ControlAssertion::Enabled(expected) => Ok(element.enabled()? == *expected),
+                ControlAssertion::Focused(expected) => {
+                    let focused = self.window_focused(pid, &window)?
+                        && Element::application(pid)?.focused_control()?.as_ref() == Some(&element);
+                    Ok(focused == *expected)
+                }
+                ControlAssertion::Text(expected) => element.text_equals(expected),
+                ControlAssertion::Checked(expected) => element.checked_equals(*expected),
+            }
+        })
+    }
     fn observe(&mut self, condition: &Condition) -> BackendResult<bool> {
         autoreleasepool(|_| match condition {
             Condition::ControlExists { control }
@@ -544,6 +578,56 @@ impl DesktopBackend for MacOsBackend {
     fn press_key(&mut self, key: Key, modifiers: &[Modifier]) -> BackendResult<()> {
         self.keyboard_pair(keyboard::keycode(key), keyboard::flags(modifiers), None)
     }
+    fn pointer_position(&mut self) -> BackendResult<Point> {
+        self.ensure_input_access()?;
+        let p = CGEvent::new(self.event_source()?)
+            .map_err(|_| native("could not read pointer location"))?
+            .location();
+        Ok(Point { x: p.x, y: p.y })
+    }
+    fn begin_drag(&mut self, from: Point, button: MouseButton) -> BackendResult<DragSession> {
+        self.ensure_input_access()?;
+        if !from.x.is_finite() || !from.y.is_finite() {
+            return Err(native("pointer coordinates must be finite"));
+        }
+        let source = self.event_source()?;
+        let (button, down_kind, drag_kind, up_kind) = match button {
+            MouseButton::Left => (
+                CGMouseButton::Left,
+                CGEventType::LeftMouseDown,
+                CGEventType::LeftMouseDragged,
+                CGEventType::LeftMouseUp,
+            ),
+            MouseButton::Right => (
+                CGMouseButton::Right,
+                CGEventType::RightMouseDown,
+                CGEventType::RightMouseDragged,
+                CGEventType::RightMouseUp,
+            ),
+            MouseButton::Middle => (
+                CGMouseButton::Center,
+                CGEventType::OtherMouseDown,
+                CGEventType::OtherMouseDragged,
+                CGEventType::OtherMouseUp,
+            ),
+        };
+        let p = CGPoint::new(from.x, from.y);
+        let down = CGEvent::new_mouse_event(source.clone(), down_kind, p, button)
+            .map_err(|_| native("could not allocate drag-down event"))?;
+        let motion = CGEvent::new_mouse_event(source.clone(), drag_kind, p, button)
+            .map_err(|_| native("could not allocate drag-motion event"))?;
+        let up = CGEvent::new_mouse_event(source, up_kind, p, button)
+            .map_err(|_| native("could not allocate drag-up event"))?;
+        for event in [&down, &motion, &up] {
+            event.set_flags(CGEventFlags::empty());
+            event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, 1);
+        }
+        // Allocate every resource, including the guard, before any button-down.
+        let session = DragSession::new(MacDrag { motion, up });
+        ffi::stamp(&down);
+        down.post(CGEventTapLocation::HID);
+        Ok(session)
+    }
     fn move_pointer(&mut self, x: f64, y: f64) -> BackendResult<()> {
         self.ensure_input_access()?;
         if !x.is_finite() || !y.is_finite() {
@@ -614,5 +698,27 @@ impl DesktopBackend for MacOsBackend {
         event.set_flags(CGEventFlags::empty());
         event.post(CGEventTapLocation::HID);
         Ok(())
+    }
+}
+
+struct MacDrag {
+    motion: CGEvent,
+    up: CGEvent,
+}
+impl DragBackend for MacDrag {
+    fn move_to(&mut self, point: Point) -> BackendResult<()> {
+        if !point.x.is_finite() || !point.y.is_finite() {
+            return Err(native("drag coordinates must be finite"));
+        }
+        let point = CGPoint::new(point.x, point.y);
+        self.motion.set_location(point);
+        ffi::stamp(&self.motion);
+        self.motion.post(CGEventTapLocation::HID);
+        self.up.set_location(point);
+        Ok(())
+    }
+    fn release(&mut self) {
+        ffi::stamp(&self.up);
+        self.up.post(CGEventTapLocation::HID);
     }
 }

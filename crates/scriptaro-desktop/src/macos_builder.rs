@@ -208,6 +208,11 @@ fn edit_action(
     old: Option<&Action>,
     readiness: bool,
 ) -> Result<Option<Vec<Action>>, Box<dyn Error>> {
+    if old.is_some_and(|action| Kind::of(action) == Kind::Advanced) {
+        return Err(
+            "Edit this action in the YAML editor; guided forms are not available yet.".into(),
+        );
+    }
     let form = if let Some(action) = old {
         Form::from_action(action)
     } else {

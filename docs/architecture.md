@@ -54,10 +54,11 @@ asynchronous file opens produce an owned `PendingOpen` future. The engine polls
 that future while servicing native events and playback controls.
 
 Native requests already handed to the OS cannot necessarily be cancelled. The
-future's drop only ends Scriptaro's wait. Input methods must emit complete
-down/up pairs without yielding, allocate both events before posting either, and
-leave no held key/button on return. Held-key and drag actions are deliberately
-absent until cancellation-safe ownership is designed.
+future's drop only ends Scriptaro's wait. Key presses and clicks emit complete
+down/up pairs without yielding and allocate both events before posting either.
+Dragging instead returns an owned `DragSession` that releases the button on drop,
+including errors, cancellation and host interruption. Standalone held keys remain
+unimplemented.
 
 `RecordingBackend` implements the same contract, records operations, and never
 calls a desktop API. It powers dry runs and deterministic tests.
@@ -74,7 +75,7 @@ AppKit discovers/activates apps and opens files with the modern completion-handl
 API. Accessibility/Quartz permission queries provide preflight errors.
 CoreGraphics posts text, key, mouse, and scroll events. Logical keys are mapped
 inside this crate. Raw FFI is limited to permission queries and physical key-state
-polling not exposed by the selected wrapper crate; each call documents its safety.
+polling and event timestamps not exposed by the selected wrapper crate; each call documents its safety.
 
 The `accessibility` module also wraps a small SDK-verified AXUIElement ABI, with
 Core Foundation ownership and runtime type checks for returned values. Per-element
@@ -123,3 +124,16 @@ readiness edits produce conditions with the script default timeout. Applying
 serializes and validates the complete draft and replaces editor source in one
 undo group. Cancelling never touches the document. The `basic` recipe is shared
 with the CLI and contains only a wait; discovery and playback remain explicit.
+
+## Motion and property assertions
+
+The engine interpolates pointer movement with platform-neutral timing. Backends
+expose pointer position, begin-drag and explicit control-property checks through
+separate capabilities. `DragSession` owns a backend resource and calls its
+infallible release on drop; native backends must allocate release resources
+before posting down. Pausing an active drag terminates it with a diagnostic.
+
+macOS uses CoreGraphics drag events and SDK timestamp/uptime functions for
+preallocated events. Assertions read only the requested Accessibility property;
+discovery still does not read field values. Native values never enter engine
+events or reports. Simulated assertions are explicitly marked as assumed.

@@ -4,6 +4,7 @@ use core_foundation::{
     array::CFArray,
     base::{CFType, CFTypeID, CFTypeRef, TCFType},
     boolean::CFBoolean,
+    number::CFNumber,
     string::{CFString, CFStringRef},
 };
 use scriptaro_core::{ControlRole, ControlSelector};
@@ -149,6 +150,23 @@ impl Element {
             })
             .transpose()
             .map(|value| value.filter(|s| !s.is_empty()))
+    }
+
+    /// Explicit assertion read; discovery never calls this method.
+    pub(crate) fn text_equals(&self, expected: &str) -> BackendResult<bool> {
+        if self.optional_string("AXSubrole")?.as_deref() == Some("AXSecureTextField") {
+            return Err(native("secure field values are unavailable"));
+        }
+        let value = self
+            .attribute("AXValue")?
+            .ok_or_else(|| native("control has no text value"))?;
+        text_value_equals(&value, expected)
+    }
+    pub(crate) fn checked_equals(&self, expected: bool) -> BackendResult<bool> {
+        let value = self
+            .attribute("AXValue")?
+            .ok_or_else(|| native("check box has no value"))?;
+        checked_value_equals(&value, expected)
     }
 
     pub(crate) fn enabled(&self) -> BackendResult<bool> {
@@ -388,5 +406,59 @@ impl Element {
             },
             "raise selected window",
         )
+    }
+}
+
+fn text_value_equals(value: &CFType, expected: &str) -> BackendResult<bool> {
+    let value = value
+        .downcast::<CFString>()
+        .ok_or_else(|| native("control value is not text"))?;
+    if value.char_len() > scriptaro_core::MAX_SCRIPT_BYTES as isize {
+        return Err(native("control text exceeds 4 MiB"));
+    }
+    let value = value.to_string();
+    if value.len() > scriptaro_core::MAX_SCRIPT_BYTES {
+        return Err(native("control text exceeds 4 MiB"));
+    }
+    Ok(value == expected)
+}
+
+fn checked_value_equals(value: &CFType, expected: bool) -> BackendResult<bool> {
+    if let Some(value) = value.downcast::<CFBoolean>() {
+        return Ok(bool::from(value) == expected);
+    }
+    let value = value
+        .downcast::<CFNumber>()
+        .and_then(|n| n.to_f64())
+        .ok_or_else(|| native("check box value is not numeric"))?;
+    match value {
+        0.0 => Ok(!expected),
+        1.0 => Ok(expected),
+        2.0 => Ok(false), // Mixed is neither checked nor unchecked.
+        _ => Err(native("check box value is not a supported state")),
+    }
+}
+
+#[cfg(test)]
+mod assertion_tests {
+    use super::*;
+    #[test]
+    fn explicit_values_preserve_empty_unicode_and_mixed_state_without_coercion() {
+        for text in ["", "🦀\n", " spaced "] {
+            let value = CFString::new(text).as_CFType();
+            assert!(text_value_equals(&value, text).unwrap());
+            assert!(!text_value_equals(&value, "different").unwrap());
+            assert!(checked_value_equals(&value, true).is_err());
+        }
+        for (number, checked, unchecked) in
+            [(0i64, false, true), (1, true, false), (2, false, false)]
+        {
+            let value = CFNumber::from(number).as_CFType();
+            assert_eq!(checked_value_equals(&value, true).unwrap(), checked);
+            assert_eq!(checked_value_equals(&value, false).unwrap(), unchecked);
+            assert!(text_value_equals(&value, "").is_err());
+        }
+        assert!(checked_value_equals(&CFNumber::from(0.5f64).as_CFType(), false).is_err());
+        assert!(checked_value_equals(&CFBoolean::true_value().as_CFType(), true).unwrap());
     }
 }

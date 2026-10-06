@@ -69,6 +69,7 @@ where
             "desktop"
         },
         readiness_assumed: args.dry_run,
+        assertions_assumed: args.dry_run,
         timing_preserved: !args.dry_run || args.realtime,
         speed: args.speed.is_finite().then_some(args.speed),
         start_delay_ms: args.start_delay_ms,
@@ -391,5 +392,46 @@ mod tests {
         assert_eq!(outcome.report_error.unwrap().code, "report_write_failed");
         assert_eq!(fs::read_to_string(path).unwrap(), "external edit");
         assert_eq!(fs::read_dir(&scratch.0).unwrap().count(), 2);
+    }
+    #[tokio::test]
+    async fn assertion_failure_has_a_saved_diagnostic_without_expected_text() {
+        struct AssertionFixture;
+        impl DesktopBackend for AssertionFixture {
+            fn name(&self) -> &'static str {
+                "assertion fixture"
+            }
+            fn capabilities(&self) -> &'static [Capability] {
+                &[
+                    Capability::ControlAssertions,
+                    Capability::Controls,
+                    Capability::Windows,
+                ]
+            }
+            fn is_simulated(&self) -> bool {
+                true
+            }
+            fn assert_control(
+                &mut self,
+                _: &scriptaro_core::ControlSelector,
+                _: &scriptaro_core::ControlAssertion,
+            ) -> BackendResult<bool> {
+                Ok(false)
+            }
+        }
+        let scratch = Scratch::new();
+        let args = args(&scratch);
+        fs::write(&args.script,"version: 1\nsteps:\n  - action: assert_control\n    control: {window: {app: {by: name, value: Fixture}, title: Scratch}, role: text_field, identifier: field}\n    expect: {property: text, equals: 'PRIVATE expected'}\n").unwrap();
+        let path = args.report.clone().unwrap();
+        let result = execute_with_backend(args, true, |_| Ok(Box::new(AssertionFixture))).await;
+        assert_eq!(result.exit_code, 1);
+        assert_eq!(result.data["completed_steps"], 0);
+        assert_eq!(result.data["failed_step"], 1);
+        assert_eq!(result.error.as_ref().unwrap().code, "assertion_failed");
+        let saved = fs::read_to_string(path).unwrap();
+        assert!(!saved.contains("PRIVATE"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&saved).unwrap(),
+            serde_json::to_value(result).unwrap()
+        );
     }
 }

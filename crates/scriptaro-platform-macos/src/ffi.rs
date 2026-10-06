@@ -1,5 +1,6 @@
 //! Small ABI surface not exposed by core-graphics. Signatures match SDK headers.
-use core_graphics::event_source::CGEventSourceStateID;
+use core_graphics::{event::CGEvent, event_source::CGEventSourceStateID};
+use foreign_types::ForeignType;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -9,6 +10,7 @@ unsafe extern "C" {
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
+    fn CGEventSetTimestamp(event: core_graphics::sys::CGEventRef, timestamp: u64);
     pub fn CGPreflightPostEventAccess() -> bool;
     pub fn CGPreflightListenEventAccess() -> bool;
     pub fn CGEventSourceKeyState(state: CGEventSourceStateID, key: u16) -> bool;
@@ -32,4 +34,15 @@ pub fn can_listen() -> bool {
 pub fn key_down(code: u16) -> bool {
     // SAFETY: valid state enum and a virtual key code; reads hardware state only.
     unsafe { CGEventSourceKeyState(CGEventSourceStateID::HIDSystemState, code) }
+}
+
+unsafe extern "C" {
+    fn clock_gettime_nsec_np(clock_id: u32) -> u64;
+}
+/// Refresh preallocated drag events with uptime nanoseconds (SDK CLOCK_UPTIME_RAW=8).
+pub fn stamp(event: &CGEvent) {
+    // SAFETY: owned event pointer, SDK uint64 timestamp, read-only uptime clock.
+    unsafe {
+        CGEventSetTimestamp(event.as_ptr(), clock_gettime_nsec_np(8));
+    }
 }
