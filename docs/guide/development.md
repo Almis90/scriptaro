@@ -318,3 +318,35 @@ outcome write failures, partial typing, cancellation, privacy, and a hard-killed
 simulated CLI process. Completed records survive the kill; an unfinished action
 is reported as uncertain. No live desktop runs or repeated native suites were
 performed. These checks do not qualify native acceptance in additional apps.
+
+## Single-take journal qualification (2026-10-06)
+
+The dedicated runner performs exactly one native playback, using a new TextEdit
+instance and disposable document. It plans to type Unicode text through a nested
+sequence, observe its `after` condition, save the file, then stop at an intentional
+assertion failure. It checks saved text independently and compares source references,
+counts, and outcomes across the plan, journal, and final report. It has no repeat
+option and does not retry effects:
+
+```sh
+python3 tests/macos/journal_trial.py --binary target/release/scriptaro
+```
+
+The first attempt against commit `8384d51` on macOS 26.2 / TextEdit 1.20 **failed
+before typing**. The activation request returned, but `window_active` was not
+observed within 5000 ms. The cause was not established; increasing the timeout
+or changing activation behavior without further evidence is not a verified fix.
+
+The complete journal correctly recorded the failed `activate_window` at
+`sections[1].setup[1]`, `partially_dispatched` evidence, zero completed actions,
+and a final timeout result matching the saved report. No later action started,
+the scratch document remained empty, and the owned TextEdit process was closed.
+The local artifacts are under `target/verification/journal-w7y59mw2/`, including
+`report.json`, `take-result.json`, `take.jsonl`, and `evidence-review.json`.
+They are not checked into the repository.
+
+This verifies journal handling of a native activation timeout. It does **not**
+qualify native text acceptance, the generated postcondition, or the intended
+nested assertion failure; those stages were not reached. There was one live
+attempt and no repeat. The next investigation is window-activation readiness,
+including distinguishing application foreground state from focused-window identity.

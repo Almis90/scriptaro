@@ -204,3 +204,11 @@ releases remain unpublished.
   explain precedence, repeatability and the lack of trailing delays.
 - Added virtual-time and validation regressions; no live desktop runs or guided
   profile forms in this milestone.
+
+### Native journal qualification — 2026-10-06
+
+- Added a one-take TextEdit runner for native input boundaries and journal/source
+  consistency. The initial attempt stopped at window-activation readiness before
+  typing; its journal/report correctly retained the timeout and original source.
+- Documented the failed qualification and untested stages. No retries or native
+  engine behavior changes were made.

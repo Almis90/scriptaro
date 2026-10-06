@@ -130,3 +130,12 @@ script paths, literal section/sequence names, source structure, character counts
 action kinds, timestamps, and safe result/error codes. Review that metadata before
 sharing. Existing console logging, plan target details, and final diagnostics have
 their own content policies; `--journal` does not redact those other channels.
+
+## Native qualification status
+
+One controlled TextEdit take recorded a real activation timeout correctly, with
+matching source references and final report. It stopped before typing, so this
+attempt does not establish native input/postcondition reliability. See the
+[single-take qualification notes](/guide/development#single-take-journal-qualification-2026-10-06)
+for the result and the opt-in runner. Its simulated crash and fault-injection
+coverage remains separate evidence.
