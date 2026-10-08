@@ -17,6 +17,8 @@ pub struct Diagnostic {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Context {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_activation: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<scriptaro_core::yaml::SourceOrigin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
@@ -208,6 +210,20 @@ impl From<EngineError> for Diagnostic {
                         "Inspect the journal and application state before a fresh take; no effects are retried.",
                     ),
                     StepError::Backend(error) => Self::from(error),
+                    StepError::WindowActivationTimeout { diagnostics, .. } => {
+                        let mut diagnostic = Self::new(
+                            "timeout",
+                            message,
+                            "The activation request was sent once. Compare application_active, input_application_matches and window_focused; observations are after timeout and do not authorize replay.",
+                        );
+                        diagnostic.context.window_activation = Some(serde_json::json!({
+                            "observed_after_timeout": true,
+                            "application_active": diagnostics.application_active,
+                            "input_application_matches": diagnostics.input_application_matches,
+                            "window_focused": diagnostics.window_focused,
+                        }));
+                        diagnostic
+                    }
                     StepError::Timeout(_) | StepError::ReadinessTimeout { .. } => Self::new(
                         "timeout",
                         message,
@@ -242,5 +258,37 @@ impl From<EngineError> for Diagnostic {
                 diagnostic
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn activation_timeout_keeps_code_step_and_structured_observations() {
+        let diagnostic = Diagnostic::from(EngineError::Step {
+            step: 2,
+            action: "activate_window",
+            source: StepError::WindowActivationTimeout {
+                timeout_ms: 5000,
+                diagnostics: scriptaro_platform::WindowActivationDiagnostics {
+                    application_active: false,
+                    input_application_matches: None,
+                    window_focused: true,
+                },
+            },
+        });
+        let json = serde_json::to_value(&diagnostic).unwrap();
+        assert_eq!(json["code"], "timeout");
+        assert_eq!(json["step"], 2);
+        assert_eq!(json["action"], "activate_window");
+        assert_eq!(
+            json["window_activation"],
+            serde_json::json!({
+                "observed_after_timeout": true, "application_active": false,
+                "input_application_matches": null, "window_focused": true,
+            })
+        );
+        assert!(diagnostic.text().contains("observations after timeout"));
     }
 }

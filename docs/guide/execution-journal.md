@@ -133,9 +133,18 @@ their own content policies; `--journal` does not redact those other channels.
 
 ## Native qualification status
 
-One controlled TextEdit take recorded a real activation timeout correctly, with
-matching source references and final report. It stopped before typing, so this
-attempt does not establish native input/postcondition reliability. See the
-[single-take qualification notes](/guide/development#single-take-journal-qualification-2026-10-06)
-for the result and the opt-in runner. Its simulated crash and fault-injection
-coverage remains separate evidence.
+The October 6 TextEdit attempt stopped at activation and correctly preserved its
+failure evidence. A single October 8 take on macOS 26.2 / TextEdit 1.20 completed
+native entry of 61 Unicode scalar values, observed the authored postcondition,
+and independently matched the saved file. Its intentional assertion failure then
+stopped at the expected nested source, with no following input and matching journal
+and final report.
+
+The previous activation timeout did not recur; its cause remains unconfirmed and
+activation behavior was not changed. See the
+[qualification follow-up](/guide/development#activation-investigation-2026-10-08)
+for scope and artifact references, and
+[activation diagnostics](/guide/macos#diagnose-an-activation-timeout) for the additional
+observations now available on timeouts. This is one controlled take, not a failure-rate
+estimate or qualification of arbitrary applications. Simulated crash and
+fault-injection coverage remains separate evidence.

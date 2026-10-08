@@ -96,6 +96,17 @@ pub struct WindowTarget {
     pub id: u64,
 }
 
+/// Read-only observations collected after window-activation readiness times out.
+/// Fields describe separate predicates, not a single atomic desktop snapshot.
+/// `input_application_matches` is None if the backend cannot observe that state.
+/// No application names, window titles, control values or native handles are kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowActivationDiagnostics {
+    pub application_active: bool,
+    pub input_application_matches: Option<bool>,
+    pub window_focused: bool,
+}
+
 /// Discovery exposes selector metadata only, never field contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlInfo {
@@ -212,6 +223,14 @@ pub trait DesktopBackend {
     }
     fn is_window_active(&mut self, _window: &WindowTarget) -> BackendResult<bool> {
         Err(self.unsupported(Capability::Windows))
+    }
+    /// Optional, bounded, read-only diagnosis after an activation timeout.
+    /// Never activate, raise, reselect or retry a target from this method.
+    fn window_activation_diagnostics(
+        &mut self,
+        _window: &WindowTarget,
+    ) -> BackendResult<Option<WindowActivationDiagnostics>> {
+        Ok(None)
     }
     /// Resolve uniquely and dispatch size/position once, without activation.
     /// None means absent and guarantees no changes were attempted. Errors may

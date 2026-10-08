@@ -23,8 +23,8 @@ use scriptaro_core::{
 };
 use scriptaro_platform::{
     ApplicationInfo, BackendError, BackendResult, Capability, ControlInfo, ControlTarget,
-    DesktopBackend, DragBackend, DragSession, PendingOpen, PermissionStatus, WindowInfo,
-    WindowTarget,
+    DesktopBackend, DragBackend, DragSession, PendingOpen, PermissionStatus,
+    WindowActivationDiagnostics, WindowInfo, WindowTarget,
 };
 use std::{path::Path, sync::Mutex, time::Duration};
 
@@ -390,6 +390,32 @@ impl DesktopBackend for MacOsBackend {
             return Err(native("invalid native window identity"));
         };
         self.window_focused(pid, &window)
+    }
+    fn window_activation_diagnostics(
+        &mut self,
+        target: &WindowTarget,
+    ) -> BackendResult<Option<WindowActivationDiagnostics>> {
+        self.ensure_accessibility()?;
+        let window = self
+            .windows
+            .iter()
+            .find(|(known, _)| known == target)
+            .map(|(_, window)| window.clone())
+            .ok_or_else(|| native("unknown window identity"))?;
+        let AppSelector::Pid(pid) = target.app else {
+            return Err(native("invalid native window identity"));
+        };
+        let application_active = self.is_app_active(&target.app)?;
+        // Inspect window identity even if the application isn't foreground. A
+        // window can be focused within its app without receiving global input.
+        let window_focused = Element::application(pid)?.focused_window()?.as_ref() == Some(&window);
+        let input_application_matches =
+            Element::input_application_pid()?.map(|input_pid| input_pid == pid);
+        Ok(Some(WindowActivationDiagnostics {
+            application_active,
+            input_application_matches,
+            window_focused,
+        }))
     }
     fn list_controls(&mut self, selector: &WindowSelector) -> BackendResult<Vec<ControlInfo>> {
         let (_, window) = self

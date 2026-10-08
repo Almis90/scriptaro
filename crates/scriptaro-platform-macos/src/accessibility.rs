@@ -28,6 +28,8 @@ const ENUMERATION_BUDGET: Duration = Duration::from_secs(2);
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
+    fn AXUIElementCreateSystemWide() -> AXUIElementRef;
+    fn AXUIElementGetPid(element: AXUIElementRef, pid: *mut i32) -> i32;
     fn AXUIElementGetTypeID() -> CFTypeID;
     fn AXUIElementCopyAttributeValue(
         element: AXUIElementRef,
@@ -79,6 +81,27 @@ fn check(code: i32, operation: &str) -> BackendResult<()> {
 pub(crate) struct Element(CFType);
 
 impl Element {
+    pub(crate) fn input_application_pid() -> BackendResult<Option<u32>> {
+        // SAFETY: no arguments; returns an owned AX system object or null.
+        let raw = unsafe { AXUIElementCreateSystemWide() };
+        if raw.is_null() {
+            return Err(native("could not create system Accessibility element"));
+        }
+        // SAFETY: checked non-null Create result, retained under the create rule.
+        let system = Self::from_cf(unsafe { CFType::wrap_under_create_rule(raw) })?;
+        let Some(value) = system.attribute("AXFocusedApplication")? else {
+            return Ok(None);
+        };
+        let application = Self::from_cf(value)?;
+        let mut pid = 0;
+        check(
+            // SAFETY: application is a checked AX element; pid is a writable SDK pid_t.
+            unsafe { AXUIElementGetPid(application.0.as_CFTypeRef(), &mut pid) },
+            "read input application PID",
+        )?;
+        Ok(u32::try_from(pid).ok().filter(|pid| *pid > 0))
+    }
+
     pub(crate) fn bounds(&self) -> BackendResult<Bounds> {
         let position = self
             .attribute("AXPosition")?

@@ -12,8 +12,8 @@ use scriptaro_core::{
     ValidationError, WindowSelector,
 };
 use scriptaro_platform::{
-    BackendError, BackendResult, ControlTarget, DesktopBackend, DragSession, WindowTarget,
-    required_capabilities,
+    BackendError, BackendResult, ControlTarget, DesktopBackend, DragSession,
+    WindowActivationDiagnostics, WindowTarget, required_capabilities,
 };
 use std::{collections::HashSet, future::Future, path::PathBuf, pin::Pin, time::Duration};
 use thiserror::Error;
@@ -136,6 +136,13 @@ pub enum StepError {
     ReadinessTimeout {
         condition: &'static str,
         timeout_ms: u64,
+    },
+    #[error(
+        "timed out after {timeout_ms} ms waiting for window_active; observations after timeout: {diagnostics:?}"
+    )]
+    WindowActivationTimeout {
+        timeout_ms: u64,
+        diagnostics: WindowActivationDiagnostics,
     },
     #[error("focus left the intended application ({0:?}); playback stopped")]
     FocusLost(AppSelector),
@@ -544,9 +551,13 @@ impl<'a> Engine<'a> {
         // Once dispatched, never repeat an activation request. Observe only.
         loop {
             self.checkpoint().await?;
-            Self::check_deadline(deadline, "window_active", timeout_ms)?;
+            if Instant::now() >= deadline {
+                return Err(self.activation_timeout(&target, timeout_ms));
+            }
             let active = self.backend.is_window_active(&target)?;
-            Self::check_deadline(deadline, "window_active", timeout_ms)?;
+            if Instant::now() >= deadline {
+                return Err(self.activation_timeout(&target, timeout_ms));
+            }
             if active {
                 self.focus = Some(target.app.clone());
                 self.window_focus = Some(target);
@@ -554,6 +565,24 @@ impl<'a> Engine<'a> {
                 return Ok(());
             }
             self.poll_again(deadline).await;
+        }
+    }
+
+    fn activation_timeout(&mut self, target: &WindowTarget, timeout_ms: u64) -> StepError {
+        match self.backend.window_activation_diagnostics(target) {
+            Ok(Some(diagnostics)) => StepError::WindowActivationTimeout {
+                timeout_ms,
+                diagnostics,
+            },
+            result => {
+                if let Err(error) = result {
+                    tracing::warn!(%error, "could not collect window activation diagnostics");
+                }
+                StepError::ReadinessTimeout {
+                    condition: "window_active",
+                    timeout_ms,
+                }
+            }
         }
     }
 

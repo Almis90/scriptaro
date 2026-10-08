@@ -29,6 +29,10 @@ def check_trial(trial):
     trial.report['permissions'] = permissions
     trial.report['commit'] = subprocess.check_output(
         ['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
+    # HEAD alone does not identify an instrumented, uncommitted binary.
+    source_diff = subprocess.check_output(['git', '-C', str(ROOT), 'diff', 'HEAD', '--', 'crates', 'Cargo.toml', 'Cargo.lock'])
+    trial.report['tracked_source_diff_sha256'] = hashlib.sha256(source_diff).hexdigest()
+    trial.report['tracked_source_modified'] = bool(source_diff)
     trial.report['binary_version'] = trial.cli('binary_version', '--version').stdout.strip()
     trial.report['binary_sha256'] = hashlib.sha256(Path(trial.binary).read_bytes()).hexdigest()
     trial.save()

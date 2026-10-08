@@ -1,7 +1,8 @@
 use scriptaro_core::{Action, AppSelector, Condition, Script, WindowSelector};
 use scriptaro_engine::{Engine, EngineError, RunOptions, RunStatus, StepError};
 use scriptaro_platform::{
-    BackendError, BackendResult, Capability, DesktopBackend, WindowTarget,
+    BackendError, BackendResult, Capability, DesktopBackend, WindowActivationDiagnostics,
+    WindowTarget,
     recording::{Operation, RecordingBackend},
 };
 use std::time::Duration;
@@ -56,6 +57,9 @@ struct Desktop {
     window_capability: bool,
     activation_requests: usize,
     observations: usize,
+    diagnostics: Option<WindowActivationDiagnostics>,
+    diagnostic_calls: usize,
+    diagnostic_error: bool,
 }
 
 impl Default for Desktop {
@@ -71,6 +75,9 @@ impl Default for Desktop {
             window_capability: true,
             activation_requests: 0,
             observations: 0,
+            diagnostics: None,
+            diagnostic_calls: 0,
+            diagnostic_error: false,
         }
     }
 }
@@ -132,6 +139,17 @@ impl DesktopBackend for Desktop {
         Ok(self.elapsed_ms() >= self.focused_ms
             && self.elapsed_ms() < self.loses_window_ms
             && self.recording.is_window_active(target)?)
+    }
+    fn window_activation_diagnostics(
+        &mut self,
+        _: &WindowTarget,
+    ) -> BackendResult<Option<WindowActivationDiagnostics>> {
+        self.diagnostic_calls += 1;
+        if self.diagnostic_error {
+            Err(BackendError::Native("diagnostic query failed".into()))
+        } else {
+            Ok(self.diagnostics)
+        }
     }
     fn observe(&mut self, _: &Condition) -> BackendResult<bool> {
         self.observations += 1;
@@ -491,4 +509,72 @@ async fn cancellation_received_inside_a_focus_query_prevents_input() {
         backend.recording.operations,
         vec![Operation::ActivateWindow(window())]
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn activation_timeout_diagnostics_do_not_retry_or_turn_late_focus_into_success() {
+    for (application_active, input_application_matches, window_focused) in [
+        (false, Some(false), true),
+        (true, Some(true), false),
+        (false, Some(true), true),
+        (true, Some(true), true), // The desktop can change after the deadline.
+        (false, None, false),
+    ] {
+        let diagnostics = WindowActivationDiagnostics {
+            application_active,
+            input_application_matches,
+            window_focused,
+        };
+        let mut backend = Desktop {
+            focused_ms: 1000,
+            diagnostics: Some(diagnostics),
+            ..Default::default()
+        };
+        let result = Engine::new(&mut backend, RunOptions::default())
+            .run(&script(vec![activate(75), text()]))
+            .await;
+        assert!(
+            matches!(result, Err(EngineError::Step { step: 1, source: StepError::WindowActivationTimeout { timeout_ms: 75, diagnostics: observed }, .. }) if observed == diagnostics)
+        );
+        assert_eq!(backend.activation_requests, 1);
+        assert_eq!(backend.diagnostic_calls, 1);
+        assert_eq!(backend.started.elapsed(), Duration::from_millis(75));
+        assert!(
+            !backend
+                .recording
+                .operations
+                .iter()
+                .any(|op| matches!(op, Operation::Character(_)))
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn optional_diagnostic_failure_keeps_primary_timeout_and_success_does_not_query() {
+    for fail in [true, false] {
+        let mut backend = Desktop {
+            focused_ms: if fail { 1000 } else { 0 },
+            diagnostic_error: true,
+            ..Default::default()
+        };
+        let result = Engine::new(&mut backend, RunOptions::default())
+            .run(&script(vec![activate(75)]))
+            .await;
+        assert_eq!(backend.activation_requests, 1);
+        assert_eq!(backend.diagnostic_calls, usize::from(fail));
+        if fail {
+            assert!(matches!(
+                result,
+                Err(EngineError::Step {
+                    source: StepError::ReadinessTimeout {
+                        condition: "window_active",
+                        timeout_ms: 75
+                    },
+                    ..
+                })
+            ));
+        } else {
+            assert_eq!(result.unwrap().status, RunStatus::Completed);
+        }
+    }
 }

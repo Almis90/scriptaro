@@ -350,3 +350,37 @@ qualify native text acceptance, the generated postcondition, or the intended
 nested assertion failure; those stages were not reached. There was one live
 attempt and no repeat. The next investigation is window-activation readiness,
 including distinguishing application foreground state from focused-window identity.
+
+
+## Activation investigation (2026-10-08)
+
+Added optional, platform-neutral activation diagnostics and a macOS implementation
+that separates NSWorkspace foreground state, AX keyboard-input application, and
+the selected app's focused-window identity. The engine collects these read-only
+observations once after a window-activation timeout, without repeating activation,
+changing the deadline, or permitting subsequent input. Unavailable diagnostics
+preserve the primary timeout. See [macOS diagnostics](/guide/macos#diagnose-an-activation-timeout).
+
+One live take using the instrumented release CLI based on `a76f192` **passed** on
+macOS 26.2 / TextEdit 1.20. It dispatched 61 Unicode scalar values, observed the
+expected text through the generated `after` wait, saved matching file contents,
+and stopped at the deliberately false assertion at step 8. Seven actions completed;
+the sentinel input after that assertion never started. The plan, saved report and
+journal agreed on `sequences.reject[1]` and its `take → reject` call chain. Prepared
+text was absent from the journal. The owned TextEdit instance was closed.
+
+Artifacts: `target/verification/journal-2k1lk8yf/`; run ID
+`18dc66693a0b8318-e757-0`; tested binary SHA-256
+`5ab58c9e9073f857c2ac4a78951aede4571e55a6879c2813d299c35ffb830e84`.
+The report's commit identifies the base checkout; the tested binary included the
+uncommitted diagnostic changes. The runner now also records a tracked Rust source
+diff hash for future instrumented runs. These local artifacts are not published.
+
+The previous activation timeout did not recur. No change was made to the native
+activation request, focus guards, or five-second deadline. Its root cause remains
+undetermined; this result must not be described as a proven activation fix.
+The new native timeout-diagnostic branch was not reached in this successful take.
+Fifteen focused engine readiness tests and six CLI unit tests passed, including
+fallback on a diagnostic error and refusal to advance when focus appears only
+after the deadline. No second live run was performed. Browser, cross-application,
+and native partial-typing interruption qualification remain separate work.

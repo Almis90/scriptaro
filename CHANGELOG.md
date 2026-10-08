@@ -18,6 +18,17 @@
 Source and documentation are published on GitHub. Registry packages and binary
 releases remain unpublished.
 
+### Activation diagnostics and qualification — 2026-10-08
+
+- Window activation timeouts can include separate foreground, keyboard-input app,
+  and focused-window observations in CLI JSON/reports. Diagnostic queries are
+  read-only and cannot retry activation or turn an expired deadline into success.
+- One native TextEdit take passed Unicode input, postcondition, exact saved-file,
+  nested failure-source and journal checks. The earlier activation timeout did
+  not recur; its cause remains unconfirmed and activation behavior is unchanged.
+- Added focused timeout/fallback coverage and source-diff metadata for future
+  instrumented native trials. No repeated live suite.
+
 ### Execution evidence — 2026-10-06
 
 - Added optional `run --journal PATH` synchronized JSONL records and read-only
